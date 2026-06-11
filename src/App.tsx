@@ -48,7 +48,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_ENVIRONMENT_INFO } from './data';
 import { iconMap } from './icons';
 import { useApp } from './context/AppContext';
-import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType } from './types';
+import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance } from './types';
 
 const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> = {
   animal: { icon: 'Bird', color: 'bg-orange-100 text-orange-700 border-orange-200' },
@@ -165,10 +165,19 @@ const EnvironmentCard = ({
   );
 };
 
+const formatDuration = (minutes: number) => {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h} h ${m} min` : `${h} h`;
+};
+
 const ActivityItem = ({
   activity,
   onUpdate,
   onDelete,
+  onComplete,
+  onUncomplete,
 }: {
   activity: Activity;
   onUpdate: (
@@ -176,10 +185,15 @@ const ActivityItem = ({
     updates: Pick<Activity, 'title' | 'content' | 'author'>
   ) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onComplete: (id: string, completedBy: string, durationMinutes: number) => void;
+  onUncomplete: (id: string) => void;
   key?: string;
 }) => {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [completedBy, setCompletedBy] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState('');
   const [editTitle, setEditTitle] = useState(activity.title);
   const [editContent, setEditContent] = useState(activity.content);
   const [editAuthor, setEditAuthor] = useState(activity.author);
@@ -190,6 +204,23 @@ const ActivityItem = ({
     setEditContent(activity.content);
     setEditAuthor(activity.author);
     setEditOpen(true);
+  };
+
+  const handleCircleClick = () => {
+    if (activity.completed) {
+      onUncomplete(activity.id);
+      return;
+    }
+    setCompletedBy('');
+    setDurationMinutes('');
+    setCompleteOpen(true);
+  };
+
+  const handleConfirmComplete = () => {
+    const duration = parseInt(durationMinutes, 10);
+    if (!completedBy.trim() || !duration || duration <= 0) return;
+    onComplete(activity.id, completedBy.trim(), duration);
+    setCompleteOpen(false);
   };
 
   const handleSaveEdit = async () => {
@@ -219,10 +250,22 @@ const ActivityItem = ({
 
   return (
     <>
-      <Card className="mb-4 overflow-hidden border-l-4 border-l-green-600">
+      <Card className={`mb-4 overflow-hidden border-l-4 ${activity.completed ? 'border-l-slate-300 opacity-80' : 'border-l-green-600'}`}>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCircleClick}
+                className="text-green-600 shrink-0"
+                aria-label={activity.completed ? 'Marcar como pendiente' : 'Marcar como hecha'}
+              >
+                {activity.completed ? (
+                  <CheckCircle2 className="h-5 w-5" />
+                ) : (
+                  <Circle className="h-5 w-5" />
+                )}
+              </button>
               <Badge variant="secondary" className="bg-green-50 text-green-700 hover:bg-green-100">
                 {activity.environmentName}
               </Badge>
@@ -231,26 +274,38 @@ const ActivityItem = ({
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openEdit} aria-label="Editar actividad">
-                <Pencil className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-red-600 hover:text-red-700"
-                onClick={() => setDeleteOpen(true)}
-                aria-label="Eliminar actividad"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {!activity.completed && (
+                <>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openEdit} aria-label="Editar actividad">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-red-600 hover:text-red-700"
+                    onClick={() => setDeleteOpen(true)}
+                    aria-label="Eliminar actividad"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
             </div>
           </div>
-          <CardTitle className="text-lg mt-1">{activity.title}</CardTitle>
+          <CardTitle className={`text-lg mt-1 ${activity.completed ? 'line-through text-muted-foreground' : ''}`}>
+            {activity.title}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+          <p className={`text-sm whitespace-pre-wrap ${activity.completed ? 'line-through text-muted-foreground' : 'text-muted-foreground'}`}>
             {activity.content}
           </p>
+          {activity.completed && activity.completedBy && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Realizada por {activity.completedBy}
+              {activity.durationMinutes != null && ` · ${formatDuration(activity.durationMinutes)}`}
+            </p>
+          )}
           {activity.imageUrl && (
             <img 
               src={activity.imageUrl} 
@@ -300,6 +355,43 @@ const ActivityItem = ({
         </DialogContent>
       </Dialog>
 
+      <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Marcar actividad como hecha</DialogTitle>
+            <DialogDescription>
+              Registra quién realizó la actividad y cuánto tiempo llevó.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Realizada por</Label>
+              <Input
+                value={completedBy}
+                onChange={(e) => setCompletedBy(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Tiempo empleado (minutos)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={durationMinutes}
+                onChange={(e) => setDurationMinutes(e.target.value)}
+                placeholder="Ej: 45"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompleteOpen(false)}>Cancelar</Button>
+            <Button onClick={handleConfirmComplete} className="bg-green-700 hover:bg-green-800">
+              Marcar como hecha
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader>
@@ -318,13 +410,6 @@ const ActivityItem = ({
       </Dialog>
     </>
   );
-};
-
-const formatDuration = (minutes: number) => {
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m > 0 ? `${h} h ${m} min` : `${h} h`;
 };
 
 const TaskItem = ({
@@ -430,29 +515,61 @@ const TaskItem = ({
   );
 };
 
-const TaskNoticeItem = ({ task, environmentName }: { task: Task; environmentName: string; key?: string }) => (
-  <Card className="mb-4 overflow-hidden border-l-4 border-l-orange-500">
+const NoticeItem = ({
+  notice,
+  environmentName,
+  onComplete,
+}: {
+  notice: Notice;
+  environmentName: string;
+  onComplete: (id: string) => void;
+  key?: string;
+}) => (
+  <Card
+    className={`mb-4 overflow-hidden border-l-4 ${
+      notice.importance === 'important' ? 'border-l-red-500' : 'border-l-orange-400'
+    }`}
+  >
     <CardHeader className="pb-2">
-      <div className="flex items-center justify-between">
-        <Badge variant="secondary" className="bg-orange-50 text-orange-700 hover:bg-orange-100">
-          {environmentName}
-        </Badge>
-        <Badge variant="outline" className={
-          task.priority === 'high' ? 'text-red-600 border-red-200 bg-red-50' :
-          task.priority === 'medium' ? 'text-orange-600 border-orange-200 bg-orange-50' :
-          'text-blue-600 border-blue-200 bg-blue-50'
-        }>
-          {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
-        </Badge>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {notice.environmentId && (
+            <Badge variant="secondary" className="bg-orange-50 text-orange-700 hover:bg-orange-100">
+              {environmentName}
+            </Badge>
+          )}
+          <Badge
+            variant="outline"
+            className={
+              notice.importance === 'important'
+                ? 'text-red-600 border-red-200 bg-red-50'
+                : 'text-slate-600 border-slate-200 bg-slate-50'
+            }
+          >
+            {notice.importance === 'important' ? 'Importante' : 'Normal'}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            {formatDistanceToNow(new Date(notice.createdAt), { addSuffix: true, locale: es })}
+          </span>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-green-600 shrink-0"
+          onClick={() => onComplete(notice.id)}
+          aria-label="Marcar aviso como cumplido"
+        >
+          <CheckCircle2 className="h-5 w-5" />
+        </Button>
       </div>
-      <CardTitle className="text-lg mt-2">{task.title}</CardTitle>
+      <CardTitle className="text-lg mt-2">{notice.title}</CardTitle>
     </CardHeader>
-    <CardContent>
-      <p className="text-sm text-muted-foreground flex items-center gap-1">
-        <Clock className="h-3 w-3" />
-        Vence: {new Date(task.dueDate).toLocaleDateString()}
-      </p>
-    </CardContent>
+    {notice.content && (
+      <CardContent>
+        <p className="text-sm text-muted-foreground whitespace-pre-wrap">{notice.content}</p>
+      </CardContent>
+    )}
   </Card>
 );
 
@@ -460,18 +577,33 @@ const TaskNoticeItem = ({ task, environmentName }: { task: Task; environmentName
 
 const Dashboard = () => {
   const {
-    tasks,
+    notices,
     environments,
     getEnvironmentName,
     loading,
     addEnvironment,
     updateEnvironment,
     removeEnvironment,
+    addNotice,
+    completeNotice,
   } = useApp();
-  const pendingTasks = tasks.filter((t) => !t.completed);
+  const pendingNotices = notices
+    .filter((n) => !n.completed)
+    .sort((a, b) => {
+      if (a.importance === b.importance) {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+      return a.importance === 'important' ? -1 : 1;
+    });
   const rootEnvironments = environments.filter((e) => !e.parentId);
 
   const [createEnvOpen, setCreateEnvOpen] = useState(false);
+  const [createNoticeOpen, setCreateNoticeOpen] = useState(false);
+  const [newNoticeTitle, setNewNoticeTitle] = useState('');
+  const [newNoticeContent, setNewNoticeContent] = useState('');
+  const [newNoticeImportance, setNewNoticeImportance] = useState<NoticeImportance>('normal');
+  const [newNoticeEnv, setNewNoticeEnv] = useState<string>('general');
+  const [savingNotice, setSavingNotice] = useState(false);
   const [newEnvName, setNewEnvName] = useState('');
   const [newEnvDesc, setNewEnvDesc] = useState('');
   const [newEnvType, setNewEnvType] = useState<EnvironmentType>('animal');
@@ -540,6 +672,26 @@ const Dashboard = () => {
     }
   };
 
+  const handlePublishNotice = async () => {
+    if (!newNoticeTitle.trim()) return;
+    setSavingNotice(true);
+    try {
+      await addNotice({
+        title: newNoticeTitle.trim(),
+        content: newNoticeContent.trim(),
+        importance: newNoticeImportance,
+        environmentId: newNoticeEnv === 'general' ? undefined : newNoticeEnv,
+      });
+      setNewNoticeTitle('');
+      setNewNoticeContent('');
+      setNewNoticeImportance('normal');
+      setNewNoticeEnv('general');
+      setCreateNoticeOpen(false);
+    } finally {
+      setSavingNotice(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">
@@ -555,21 +707,100 @@ const Dashboard = () => {
         <div className="w-full md:w-96 order-1 md:order-2">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold">Avisos</h2>
-            <Badge variant="outline">{pendingTasks.length} pendientes</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">{pendingNotices.length} pendientes</Badge>
+              <Dialog open={createNoticeOpen} onOpenChange={setCreateNoticeOpen}>
+                <DialogTrigger asChild>
+                  <Button type="button" size="sm" className="bg-green-700 hover:bg-green-800">
+                    <Plus className="h-4 w-4 mr-1" /> Publicar
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Publicar aviso</DialogTitle>
+                    <DialogDescription>
+                      Crea un aviso para toda la escuela o para un entorno específico.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <Label>Título</Label>
+                      <Input
+                        value={newNoticeTitle}
+                        onChange={(e) => setNewNoticeTitle(e.target.value)}
+                        placeholder="Ej: Reunión de docentes"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Descripción</Label>
+                      <Textarea
+                        value={newNoticeContent}
+                        onChange={(e) => setNewNoticeContent(e.target.value)}
+                        placeholder="Detalle del aviso..."
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Prioridad</Label>
+                      <Select
+                        value={newNoticeImportance}
+                        onValueChange={(v) => setNewNoticeImportance(v as NoticeImportance)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="normal">Normal</SelectItem>
+                          <SelectItem value="important">Importante</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Alcance</Label>
+                      <Select value={newNoticeEnv} onValueChange={setNewNoticeEnv}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="general">Toda la escuela</SelectItem>
+                          {rootEnvironments.map((e) => (
+                            <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      onClick={handlePublishNotice}
+                      disabled={savingNotice || !newNoticeTitle.trim()}
+                      className="bg-green-700 hover:bg-green-800"
+                    >
+                      {savingNotice ? 'Publicando...' : 'Publicar aviso'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
           
           <ScrollArea className="h-[calc(100vh-250px)] pr-4">
-            {pendingTasks.length > 0 ? (
-              pendingTasks.map((task) => (
-                <TaskNoticeItem
-                  key={task.id}
-                  task={task}
-                  environmentName={getEnvironmentName(task.environmentId)}
+            {pendingNotices.length > 0 ? (
+              pendingNotices.map((notice) => (
+                <NoticeItem
+                  key={notice.id}
+                  notice={notice}
+                  environmentName={
+                    notice.environmentId
+                      ? getEnvironmentName(notice.environmentId)
+                      : 'General'
+                  }
+                  onComplete={completeNotice}
                 />
               ))
             ) : (
               <div className="text-center py-12 border-2 border-dashed rounded-xl text-muted-foreground">
-                No hay tareas pendientes.
+                No hay avisos pendientes.
               </div>
             )}
           </ScrollArea>
@@ -732,6 +963,8 @@ const EnvironmentPage = () => {
     completeTask,
     uncompleteTask,
     addActivity,
+    completeActivity,
+    uncompleteActivity,
     updateActivity,
     removeActivity,
     updateEnvironmentInfo,
@@ -750,7 +983,12 @@ const EnvironmentPage = () => {
   const Icon = env ? (iconMap as any)[env.icon] : iconMap.HelpCircle;
 
   const envTasks = tasks.filter((t) => t.environmentId === id);
-  const localActivities = activities.filter((a) => a.environmentId === id);
+  const localActivities = activities
+    .filter((a) => a.environmentId === id)
+    .sort((a, b) => {
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
   const envSpreadsheets = spreadsheets.filter((s) => s.environmentId === id);
   const subEnvironments = environments.filter((e) => e.parentId === id);
   const info = environmentInfo[id!] ?? DEFAULT_ENVIRONMENT_INFO;
@@ -1036,6 +1274,8 @@ const EnvironmentPage = () => {
                     activity={a}
                     onUpdate={updateActivity}
                     onDelete={removeActivity}
+                    onComplete={completeActivity}
+                    onUncomplete={uncompleteActivity}
                   />
                 ))}
                 {localActivities.length === 0 && (

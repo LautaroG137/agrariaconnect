@@ -43,6 +43,14 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+function getErrorMessage(err: unknown) {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return 'Ocurrió un error inesperado';
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +83,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSpreadsheets(data.spreadsheets);
       setEnvironmentInfo(data.environmentInfo);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar datos');
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -88,31 +96,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getInfo = (environmentId: string): EnvironmentInfo =>
     environmentInfo[environmentId] ?? DEFAULT_ENVIRONMENT_INFO;
 
+  const runMutation = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      setError(null);
+      return await fn();
+    } catch (err) {
+      setError(getErrorMessage(err));
+      throw err;
+    }
+  };
+
   const addTask = async (task: Omit<Task, 'id' | 'completed'>) => {
-    const created = await api.insertTask(task);
+    const created = await runMutation(() => api.insertTask(task));
     setTasks((prev) => [...prev, created]);
   };
 
   const completeTask = async (id: string, completedBy: string, durationMinutes: number) => {
-    const updated = await api.updateTask(id, {
-      completed: true,
-      completedBy,
-      durationMinutes,
-    });
+    const updated = await runMutation(() =>
+      api.updateTask(id, { completed: true, completedBy, durationMinutes })
+    );
     setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
   };
 
   const uncompleteTask = async (id: string) => {
-    const updated = await api.updateTask(id, {
-      completed: false,
-      completedBy: undefined,
-      durationMinutes: undefined,
-    });
+    const updated = await runMutation(() =>
+      api.updateTask(id, { completed: false, completedBy: undefined, durationMinutes: undefined })
+    );
     setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
   };
 
   const addActivity = async (activity: Omit<Activity, 'id' | 'createdAt'>) => {
-    const created = await api.insertActivity(activity);
+    const created = await runMutation(() => api.insertActivity(activity));
     setActivities((prev) => [created, ...prev]);
   };
 
@@ -123,7 +137,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const current = getInfo(environmentId);
     const { inventory, ...details } = updates;
     if (Object.keys(details).length > 0) {
-      await api.upsertEnvironmentDetails(environmentId, details, current);
+      await runMutation(() => api.upsertEnvironmentDetails(environmentId, details, current));
     }
     setEnvironmentInfo((prev) => ({
       ...prev,
@@ -136,7 +150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addInventoryItem = async (environmentId: string, item: Omit<InventoryItem, 'id'>) => {
-    const created = await api.insertInventoryItem(environmentId, item);
+    const created = await runMutation(() => api.insertInventoryItem(environmentId, item));
     setEnvironmentInfo((prev) => ({
       ...prev,
       [environmentId]: {
@@ -151,7 +165,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     itemId: string,
     updates: Partial<InventoryItem>
   ) => {
-    await api.patchInventoryItem(itemId, updates);
+    await runMutation(() => api.patchInventoryItem(itemId, updates));
     setEnvironmentInfo((prev) => ({
       ...prev,
       [environmentId]: {
@@ -164,7 +178,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const removeInventoryItem = async (environmentId: string, itemId: string) => {
-    await api.deleteInventoryItem(itemId);
+    await runMutation(() => api.deleteInventoryItem(itemId));
     setEnvironmentInfo((prev) => ({
       ...prev,
       [environmentId]: {
@@ -175,12 +189,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addEnvironment = async (env: Omit<FormativeEnvironment, 'id'>) => {
-    const created = await api.insertEnvironment(env);
+    const created = await runMutation(async () => {
+      const environment = await api.insertEnvironment(env);
+      await api.upsertEnvironmentDetails(
+        environment.id,
+        { responsible: '', location: '', schedule: '', status: 'Activo' },
+        DEFAULT_ENVIRONMENT_INFO
+      );
+      return environment;
+    });
     setEnvironments((prev) => [...prev, created]);
+    setEnvironmentInfo((prev) => ({
+      ...prev,
+      [created.id]: { ...DEFAULT_ENVIRONMENT_INFO },
+    }));
   };
 
   const addSpreadsheet = async (sheet: Omit<Spreadsheet, 'id' | 'createdAt'>) => {
-    const created = await api.insertSpreadsheet(sheet);
+    const created = await runMutation(() => api.insertSpreadsheet(sheet));
     setSpreadsheets((prev) => [created, ...prev]);
   };
 
@@ -188,7 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     id: string,
     updates: Partial<Pick<Spreadsheet, 'title' | 'columns' | 'rows'>>
   ) => {
-    const updated = await api.patchSpreadsheet(id, updates);
+    const updated = await runMutation(() => api.patchSpreadsheet(id, updates));
     setSpreadsheets((prev) => prev.map((s) => (s.id === id ? updated : s)));
   };
 

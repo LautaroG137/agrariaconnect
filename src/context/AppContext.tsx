@@ -1,116 +1,206 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { isSupabaseConfigured } from '../lib/supabase';
+import * as api from '../lib/api';
+import { DEFAULT_ENVIRONMENT_INFO } from '../data';
 import {
-  MOCK_ACTIVITIES,
-  MOCK_ENVIRONMENT_INFO,
-  MOCK_TASKS,
-  DEFAULT_ENVIRONMENT_INFO,
-  MOCK_ENVIRONMENTS,
-} from '../data';
-import { Activity, EnvironmentInfo, InventoryItem, Task } from '../types';
+  Activity,
+  EnvironmentInfo,
+  FormativeEnvironment,
+  InventoryItem,
+  Spreadsheet,
+  Task,
+} from '../types';
 
 interface AppContextValue {
+  loading: boolean;
+  error: string | null;
+  environments: FormativeEnvironment[];
   tasks: Task[];
   activities: Activity[];
+  spreadsheets: Spreadsheet[];
   environmentInfo: Record<string, EnvironmentInfo>;
-  addTask: (task: Omit<Task, 'id' | 'completed'>) => void;
-  completeTask: (id: string, completedBy: string, durationMinutes: number) => void;
-  uncompleteTask: (id: string) => void;
-  addActivity: (activity: Omit<Activity, 'id' | 'createdAt'>) => void;
-  updateEnvironmentInfo: (environmentId: string, updates: Partial<EnvironmentInfo>) => void;
-  addInventoryItem: (environmentId: string, item: Omit<InventoryItem, 'id'>) => void;
-  updateInventoryItem: (environmentId: string, itemId: string, updates: Partial<InventoryItem>) => void;
-  removeInventoryItem: (environmentId: string, itemId: string) => void;
+  addTask: (task: Omit<Task, 'id' | 'completed'>) => Promise<void>;
+  completeTask: (id: string, completedBy: string, durationMinutes: number) => Promise<void>;
+  uncompleteTask: (id: string) => Promise<void>;
+  addActivity: (activity: Omit<Activity, 'id' | 'createdAt'>) => Promise<void>;
+  updateEnvironmentInfo: (environmentId: string, updates: Partial<EnvironmentInfo>) => Promise<void>;
+  addInventoryItem: (environmentId: string, item: Omit<InventoryItem, 'id'>) => Promise<void>;
+  updateInventoryItem: (
+    environmentId: string,
+    itemId: string,
+    updates: Partial<InventoryItem>
+  ) => Promise<void>;
+  removeInventoryItem: (environmentId: string, itemId: string) => Promise<void>;
+  addEnvironment: (env: Omit<FormativeEnvironment, 'id'>) => Promise<void>;
+  addSpreadsheet: (sheet: Omit<Spreadsheet, 'id' | 'createdAt'>) => Promise<void>;
+  updateSpreadsheet: (
+    id: string,
+    updates: Partial<Pick<Spreadsheet, 'title' | 'columns' | 'rows'>>
+  ) => Promise<void>;
   getEnvironmentName: (environmentId: string) => string;
+  refresh: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
-  const [activities, setActivities] = useState<Activity[]>(MOCK_ACTIVITIES);
-  const [environmentInfo, setEnvironmentInfo] = useState<Record<string, EnvironmentInfo>>(MOCK_ENVIRONMENT_INFO);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [environments, setEnvironments] = useState<FormativeEnvironment[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>([]);
+  const [environmentInfo, setEnvironmentInfo] = useState<Record<string, EnvironmentInfo>>({});
 
-  const getEnvironmentName = (environmentId: string) =>
-    MOCK_ENVIRONMENTS.find((e) => e.id === environmentId)?.name ?? 'Entorno';
+  const getEnvironmentName = useCallback(
+    (environmentId: string) =>
+      environments.find((e) => e.id === environmentId)?.name ?? 'Entorno',
+    [environments]
+  );
 
-  const addTask = (task: Omit<Task, 'id' | 'completed'>) => {
-    setTasks((prev) => [
-      ...prev,
-      { ...task, id: Math.random().toString(36).slice(2, 11), completed: false },
-    ]);
-  };
+  const refresh = useCallback(async () => {
+    if (!isSupabaseConfigured) {
+      setError('Faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en las variables de entorno.');
+      setLoading(false);
+      return;
+    }
 
-  const completeTask = (id: string, completedBy: string, durationMinutes: number) => {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, completed: true, completedBy, durationMinutes } : t
-      )
-    );
-  };
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.loadAppData();
+      setEnvironments(data.environments);
+      setTasks(data.tasks);
+      setActivities(data.activities);
+      setSpreadsheets(data.spreadsheets);
+      setEnvironmentInfo(data.environmentInfo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al cargar datos');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const uncompleteTask = (id: string) => {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, completed: false, completedBy: undefined, durationMinutes: undefined }
-          : t
-      )
-    );
-  };
-
-  const addActivity = (activity: Omit<Activity, 'id' | 'createdAt'>) => {
-    setActivities((prev) => [
-      {
-        ...activity,
-        id: Math.random().toString(36).slice(2, 11),
-        createdAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-  };
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const getInfo = (environmentId: string): EnvironmentInfo =>
     environmentInfo[environmentId] ?? DEFAULT_ENVIRONMENT_INFO;
 
-  const updateEnvironmentInfo = (environmentId: string, updates: Partial<EnvironmentInfo>) => {
+  const addTask = async (task: Omit<Task, 'id' | 'completed'>) => {
+    const created = await api.insertTask(task);
+    setTasks((prev) => [...prev, created]);
+  };
+
+  const completeTask = async (id: string, completedBy: string, durationMinutes: number) => {
+    const updated = await api.updateTask(id, {
+      completed: true,
+      completedBy,
+      durationMinutes,
+    });
+    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+  };
+
+  const uncompleteTask = async (id: string) => {
+    const updated = await api.updateTask(id, {
+      completed: false,
+      completedBy: undefined,
+      durationMinutes: undefined,
+    });
+    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+  };
+
+  const addActivity = async (activity: Omit<Activity, 'id' | 'createdAt'>) => {
+    const created = await api.insertActivity(activity);
+    setActivities((prev) => [created, ...prev]);
+  };
+
+  const updateEnvironmentInfo = async (
+    environmentId: string,
+    updates: Partial<EnvironmentInfo>
+  ) => {
+    const current = getInfo(environmentId);
+    const { inventory, ...details } = updates;
+    if (Object.keys(details).length > 0) {
+      await api.upsertEnvironmentDetails(environmentId, details, current);
+    }
     setEnvironmentInfo((prev) => ({
       ...prev,
-      [environmentId]: { ...getInfo(environmentId), ...updates },
+      [environmentId]: {
+        ...current,
+        ...details,
+        inventory: inventory ?? current.inventory,
+      },
     }));
   };
 
-  const addInventoryItem = (environmentId: string, item: Omit<InventoryItem, 'id'>) => {
-    const info = getInfo(environmentId);
-    updateEnvironmentInfo(environmentId, {
-      inventory: [...info.inventory, { ...item, id: Math.random().toString(36).slice(2, 11) }],
-    });
+  const addInventoryItem = async (environmentId: string, item: Omit<InventoryItem, 'id'>) => {
+    const created = await api.insertInventoryItem(environmentId, item);
+    setEnvironmentInfo((prev) => ({
+      ...prev,
+      [environmentId]: {
+        ...getInfo(environmentId),
+        inventory: [...getInfo(environmentId).inventory, created],
+      },
+    }));
   };
 
-  const updateInventoryItem = (
+  const updateInventoryItem = async (
     environmentId: string,
     itemId: string,
     updates: Partial<InventoryItem>
   ) => {
-    const info = getInfo(environmentId);
-    updateEnvironmentInfo(environmentId, {
-      inventory: info.inventory.map((item) =>
-        item.id === itemId ? { ...item, ...updates } : item
-      ),
-    });
+    await api.patchInventoryItem(itemId, updates);
+    setEnvironmentInfo((prev) => ({
+      ...prev,
+      [environmentId]: {
+        ...getInfo(environmentId),
+        inventory: getInfo(environmentId).inventory.map((item) =>
+          item.id === itemId ? { ...item, ...updates } : item
+        ),
+      },
+    }));
   };
 
-  const removeInventoryItem = (environmentId: string, itemId: string) => {
-    const info = getInfo(environmentId);
-    updateEnvironmentInfo(environmentId, {
-      inventory: info.inventory.filter((item) => item.id !== itemId),
-    });
+  const removeInventoryItem = async (environmentId: string, itemId: string) => {
+    await api.deleteInventoryItem(itemId);
+    setEnvironmentInfo((prev) => ({
+      ...prev,
+      [environmentId]: {
+        ...getInfo(environmentId),
+        inventory: getInfo(environmentId).inventory.filter((item) => item.id !== itemId),
+      },
+    }));
+  };
+
+  const addEnvironment = async (env: Omit<FormativeEnvironment, 'id'>) => {
+    const created = await api.insertEnvironment(env);
+    setEnvironments((prev) => [...prev, created]);
+  };
+
+  const addSpreadsheet = async (sheet: Omit<Spreadsheet, 'id' | 'createdAt'>) => {
+    const created = await api.insertSpreadsheet(sheet);
+    setSpreadsheets((prev) => [created, ...prev]);
+  };
+
+  const updateSpreadsheet = async (
+    id: string,
+    updates: Partial<Pick<Spreadsheet, 'title' | 'columns' | 'rows'>>
+  ) => {
+    const updated = await api.patchSpreadsheet(id, updates);
+    setSpreadsheets((prev) => prev.map((s) => (s.id === id ? updated : s)));
   };
 
   return (
     <AppContext.Provider
       value={{
+        loading,
+        error,
+        environments,
         tasks,
         activities,
+        spreadsheets,
         environmentInfo,
         addTask,
         completeTask,
@@ -120,7 +210,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addInventoryItem,
         updateInventoryItem,
         removeInventoryItem,
+        addEnvironment,
+        addSpreadsheet,
+        updateSpreadsheet,
         getEnvironmentName,
+        refresh,
       }}
     >
       {children}

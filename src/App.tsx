@@ -45,7 +45,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
-import { MOCK_ENVIRONMENTS, MOCK_SPREADSHEETS, DEFAULT_ENVIRONMENT_INFO } from './data';
+import { DEFAULT_ENVIRONMENT_INFO } from './data';
 import { iconMap } from './icons';
 import { useApp } from './context/AppContext';
 import { FormativeEnvironment, Activity, Spreadsheet, Task } from './types';
@@ -300,8 +300,17 @@ const TaskNoticeItem = ({ task, environmentName }: { task: Task; environmentName
 // --- Pages ---
 
 const Dashboard = () => {
-  const { tasks, getEnvironmentName } = useApp();
+  const { tasks, environments, getEnvironmentName, loading } = useApp();
   const pendingTasks = tasks.filter((t) => !t.completed);
+  const rootEnvironments = environments.filter((e) => !e.parentId);
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">
+        Cargando entornos...
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -380,7 +389,7 @@ const Dashboard = () => {
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {MOCK_ENVIRONMENTS.filter(e => !e.parentId).map(env => (
+            {rootEnvironments.map(env => (
               <EnvironmentCard key={env.id} env={env} />
             ))}
           </div>
@@ -392,13 +401,13 @@ const Dashboard = () => {
 
 const EnvironmentPage = () => {
   const { id } = useParams();
-  const env = MOCK_ENVIRONMENTS.find(e => e.id === id);
-  const Icon = env ? (iconMap as any)[env.icon] : iconMap.HelpCircle;
-
   const {
+    environments,
     tasks,
     activities,
+    spreadsheets,
     environmentInfo,
+    loading,
     addTask,
     completeTask,
     uncompleteTask,
@@ -407,14 +416,20 @@ const EnvironmentPage = () => {
     addInventoryItem,
     updateInventoryItem,
     removeInventoryItem,
+    addEnvironment,
+    addSpreadsheet,
+    updateSpreadsheet,
+    getEnvironmentName,
   } = useApp();
+
+  const env = environments.find(e => e.id === id);
+  const Icon = env ? (iconMap as any)[env.icon] : iconMap.HelpCircle;
 
   const envTasks = tasks.filter((t) => t.environmentId === id);
   const localActivities = activities.filter((a) => a.environmentId === id);
+  const envSpreadsheets = spreadsheets.filter((s) => s.environmentId === id);
+  const subEnvironments = environments.filter((e) => e.parentId === id);
   const info = environmentInfo[id!] ?? DEFAULT_ENVIRONMENT_INFO;
-
-  const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>(MOCK_SPREADSHEETS.filter(s => s.environmentId === id));
-  const [subEnvironments, setSubEnvironments] = useState<FormativeEnvironment[]>(MOCK_ENVIRONMENTS.filter(e => e.parentId === id));
   
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
@@ -436,11 +451,12 @@ const EnvironmentPage = () => {
   const [newInvUnit, setNewInvUnit] = useState('');
   const [newInvNotes, setNewInvNotes] = useState('');
 
+  if (loading) return <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">Cargando entorno...</div>;
   if (!env) return <div>Entorno no encontrado</div>;
 
-  const handleAddActivityManual = () => {
+  const handleAddActivityManual = async () => {
     if (!newActivityTitle.trim() || !newActivityContent.trim()) return;
-    addActivity({
+    await addActivity({
       environmentId: id!,
       environmentName: env.name,
       title: newActivityTitle.trim(),
@@ -452,8 +468,8 @@ const EnvironmentPage = () => {
     setNewActivityAuthor('');
   };
 
-  const handleAddActivity = (title: string, content: string) => {
-    addActivity({
+  const handleAddActivity = async (title: string, content: string) => {
+    await addActivity({
       environmentId: id!,
       environmentName: env.name,
       title,
@@ -462,9 +478,9 @@ const EnvironmentPage = () => {
     });
   };
 
-  const handleAddTask = () => {
+  const handleAddTask = async () => {
     if (!newTaskTitle) return;
-    addTask({
+    await addTask({
       environmentId: id!,
       title: newTaskTitle,
       dueDate: new Date(newTaskDate).toISOString(),
@@ -474,7 +490,7 @@ const EnvironmentPage = () => {
     setNewTaskDate(new Date().toISOString().split('T')[0]);
   };
 
-  const handleCreateSheet = () => {
+  const handleCreateSheet = async () => {
     if (!newSheetTitle || !newSheetCols) return;
     const cols = ['Fila', ...newSheetCols.split(',').map(c => c.trim())];
     const rowNames = newSheetRows.split(',').map(r => r.trim()).filter(r => r !== '');
@@ -485,17 +501,14 @@ const EnvironmentPage = () => {
       return row;
     });
 
-    const sheet: Spreadsheet = {
-      id: Math.random().toString(36).substr(2, 9),
+    await addSpreadsheet({
       environmentId: id!,
       title: newSheetTitle,
       columns: cols,
       rows: initialRows,
-      createdAt: new Date().toISOString(),
-    };
-    setSpreadsheets([...spreadsheets, sheet]);
+    });
     
-    handleAddActivity(
+    await handleAddActivity(
       `Nueva Planilla: ${newSheetTitle}`,
       `Se ha creado una nueva planilla de registro con ${cols.length - 1} columnas.`
     );
@@ -505,42 +518,34 @@ const EnvironmentPage = () => {
     setNewSheetRows('');
   };
 
-  const updateCell = (sheetId: string, rowIndex: number, column: string, value: string) => {
-    setSpreadsheets(spreadsheets.map(s => {
-      if (s.id === sheetId) {
-        const newRows = [...s.rows];
-        newRows[rowIndex] = { ...newRows[rowIndex], [column]: value };
-        return { ...s, rows: newRows };
-      }
-      return s;
-    }));
+  const updateCell = async (sheetId: string, rowIndex: number, column: string, value: string) => {
+    const sheet = envSpreadsheets.find((s) => s.id === sheetId);
+    if (!sheet) return;
+    const newRows = [...sheet.rows];
+    newRows[rowIndex] = { ...newRows[rowIndex], [column]: value };
+    await updateSpreadsheet(sheetId, { rows: newRows });
   };
 
-  const addRowToSheet = (sheetId: string) => {
-    setSpreadsheets(spreadsheets.map(s => {
-      if (s.id === sheetId) {
-        const newRow: Record<string, any> = { Fila: `Nueva Fila ${s.rows.length + 1}` };
-        s.columns.slice(1).forEach(col => newRow[col] = '');
-        return { ...s, rows: [...s.rows, newRow] };
-      }
-      return s;
-    }));
+  const addRowToSheet = async (sheetId: string) => {
+    const sheet = envSpreadsheets.find((s) => s.id === sheetId);
+    if (!sheet) return;
+    const newRow: Record<string, any> = { Fila: `Nueva Fila ${sheet.rows.length + 1}` };
+    sheet.columns.slice(1).forEach(col => newRow[col] = '');
+    await updateSpreadsheet(sheetId, { rows: [...sheet.rows, newRow] });
   };
 
-  const handleCreateSubEnv = () => {
+  const handleCreateSubEnv = async () => {
     if (!newSubEnvName) return;
-    const subEnv: FormativeEnvironment = {
-      id: Math.random().toString(36).substr(2, 9),
+    await addEnvironment({
       parentId: id,
       name: newSubEnvName,
       description: newSubEnvDesc,
       type: env.type,
       icon: env.icon,
       color: env.color.replace('100', '50').replace('700', '600').replace('200', '100'),
-    };
-    setSubEnvironments([...subEnvironments, subEnv]);
+    });
     
-    handleAddActivity(
+    await handleAddActivity(
       `Nuevo Sub-entorno: ${newSubEnvName}`,
       `Se ha creado un nuevo sub-espacio dentro de ${env.name}.`
     );
@@ -558,7 +563,7 @@ const EnvironmentPage = () => {
         </Link>
         {env.parentId && (
           <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
-            Sub-entorno de {MOCK_ENVIRONMENTS.find(e => e.id === env.parentId)?.name}
+            Sub-entorno de {getEnvironmentName(env.parentId!)}
           </Badge>
         )}
       </div>
@@ -817,7 +822,7 @@ const EnvironmentPage = () => {
               </div>
               
               <div className="grid grid-cols-1 gap-6">
-                {spreadsheets.map(s => (
+                {envSpreadsheets.map(s => (
                   <Card key={s.id}>
                     <CardHeader className="flex flex-row items-center justify-between">
                       <div>
@@ -1117,27 +1122,32 @@ const EnvironmentPage = () => {
 };
 
 const PlanillasPage = () => {
-  const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>(MOCK_SPREADSHEETS);
+  const { spreadsheets, environments, addSpreadsheet, getEnvironmentName, loading } = useApp();
   const [newSheetTitle, setNewSheetTitle] = useState('');
   const [newSheetCols, setNewSheetCols] = useState('');
   const [selectedEnv, setSelectedEnv] = useState('');
 
-  const handleCreateSheet = () => {
+  const handleCreateSheet = async () => {
     if (!newSheetTitle || !newSheetCols || !selectedEnv) return;
     const cols = newSheetCols.split(',').map(c => c.trim());
-    const sheet: Spreadsheet = {
-      id: Math.random().toString(36).substr(2, 9),
+    await addSpreadsheet({
       environmentId: selectedEnv,
       title: newSheetTitle,
       columns: cols,
       rows: [],
-      createdAt: new Date().toISOString(),
-    };
-    setSpreadsheets([sheet, ...spreadsheets]);
+    });
     setNewSheetTitle('');
     setNewSheetCols('');
     setSelectedEnv('');
   };
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">
+        Cargando planillas...
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -1165,7 +1175,7 @@ const PlanillasPage = () => {
                     <SelectValue placeholder="Seleccionar entorno" />
                   </SelectTrigger>
                   <SelectContent>
-                    {MOCK_ENVIRONMENTS.map(e => (
+                    {environments.map(e => (
                       <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1209,7 +1219,7 @@ const PlanillasPage = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {MOCK_ENVIRONMENTS.map(e => (
+                  {environments.map(e => (
                     <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1229,7 +1239,7 @@ const PlanillasPage = () => {
                 <div>
                   <CardTitle>{s.title}</CardTitle>
                   <CardDescription>
-                    Entorno: {MOCK_ENVIRONMENTS.find(e => e.id === s.environmentId)?.name}
+                    Entorno: {getEnvironmentName(s.environmentId)}
                   </CardDescription>
                 </div>
                 <Badge variant="outline">
@@ -1251,9 +1261,17 @@ const PlanillasPage = () => {
 // --- Main App ---
 
 export default function App() {
+  const { error, refresh } = useApp();
+
   return (
     <Router>
       <div className="min-h-screen bg-slate-50/50 font-sans antialiased">
+        {error && (
+          <div className="bg-red-50 border-b border-red-200 px-4 py-3 text-sm text-red-800 flex items-center justify-between gap-4">
+            <span>Error de conexión: {error}</span>
+            <Button size="sm" variant="outline" onClick={() => refresh()}>Reintentar</Button>
+          </div>
+        )}
         <Navbar />
         <main>
           <AnimatePresence mode="wait">

@@ -42,13 +42,13 @@ import {
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_ENVIRONMENT_INFO } from './data';
 import { iconMap } from './icons';
 import { useApp } from './context/AppContext';
-import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance } from './types';
+import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent } from './types';
 
 const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> = {
   animal: { icon: 'Bird', color: 'bg-orange-100 text-orange-700 border-orange-200' },
@@ -56,6 +56,29 @@ const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> 
   maquinaria: { icon: 'Settings', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   otro: { icon: 'HelpCircle', color: 'bg-purple-100 text-purple-700 border-purple-200' },
 };
+
+const EVENT_ICON_COLORS = [
+  { bg: 'bg-green-100', text: 'text-green-700' },
+  { bg: 'bg-blue-100', text: 'text-blue-700' },
+  { bg: 'bg-orange-100', text: 'text-orange-700' },
+  { bg: 'bg-purple-100', text: 'text-purple-700' },
+];
+
+const formatEventDateTime = (eventAt: string) => {
+  const date = new Date(eventAt);
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isToday = date.toDateString() === now.toDateString();
+  const isTomorrow = date.toDateString() === tomorrow.toDateString();
+  const time = format(date, 'HH:mm');
+  if (isToday) return `Hoy, ${time}`;
+  if (isTomorrow) return `Mañana, ${time}`;
+  return format(date, "EEE d MMM, HH:mm", { locale: es });
+};
+
+const toLocalDateInput = (iso: string) => format(new Date(iso), 'yyyy-MM-dd');
+const toLocalTimeInput = (iso: string) => format(new Date(iso), 'HH:mm');
 
 // --- Components ---
 
@@ -976,6 +999,10 @@ const EnvironmentPage = () => {
     removeEnvironment,
     addSpreadsheet,
     updateSpreadsheet,
+    events,
+    addEnvironmentEvent,
+    updateEnvironmentEvent,
+    removeEnvironmentEvent,
     getEnvironmentName,
   } = useApp();
 
@@ -990,6 +1017,9 @@ const EnvironmentPage = () => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   const envSpreadsheets = spreadsheets.filter((s) => s.environmentId === id);
+  const envEvents = events
+    .filter((e) => e.environmentId === id && !isPast(new Date(e.eventAt)))
+    .sort((a, b) => new Date(a.eventAt).getTime() - new Date(b.eventAt).getTime());
   const subEnvironments = environments.filter((e) => e.parentId === id);
   const info = environmentInfo[id!] ?? DEFAULT_ENVIRONMENT_INFO;
   
@@ -1022,6 +1052,14 @@ const EnvironmentPage = () => {
   const [editEnvDesc, setEditEnvDesc] = useState('');
   const [editEnvType, setEditEnvType] = useState<EnvironmentType>('animal');
   const [savingEnvAction, setSavingEnvAction] = useState(false);
+
+  const [eventDialogOpen, setEventDialogOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<EnvironmentEvent | null>(null);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDate, setEventDate] = useState(new Date().toISOString().split('T')[0]);
+  const [eventTime, setEventTime] = useState('09:00');
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [deleteEventTarget, setDeleteEventTarget] = useState<EnvironmentEvent | null>(null);
 
   if (loading) return <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">Cargando entorno...</div>;
   if (!env) return <div>Entorno no encontrado</div>;
@@ -1060,6 +1098,57 @@ const EnvironmentPage = () => {
       navigate(env.parentId ? `/entorno/${env.parentId}` : '/');
     } finally {
       setSavingEnvAction(false);
+    }
+  };
+
+  const openCreateEvent = () => {
+    setEditingEvent(null);
+    setEventTitle('');
+    setEventDate(new Date().toISOString().split('T')[0]);
+    setEventTime('09:00');
+    setEventDialogOpen(true);
+  };
+
+  const openEditEvent = (event: EnvironmentEvent) => {
+    setEditingEvent(event);
+    setEventTitle(event.title);
+    setEventDate(toLocalDateInput(event.eventAt));
+    setEventTime(toLocalTimeInput(event.eventAt));
+    setEventDialogOpen(true);
+  };
+
+  const handleSaveEvent = async () => {
+    if (!eventTitle.trim() || !eventDate || !eventTime) return;
+    setSavingEvent(true);
+    try {
+      const eventAt = new Date(`${eventDate}T${eventTime}`).toISOString();
+      if (editingEvent) {
+        await updateEnvironmentEvent(editingEvent.id, {
+          title: eventTitle.trim(),
+          eventAt,
+        });
+      } else {
+        await addEnvironmentEvent({
+          environmentId: id!,
+          title: eventTitle.trim(),
+          eventAt,
+        });
+      }
+      setEventDialogOpen(false);
+      setEditingEvent(null);
+    } finally {
+      setSavingEvent(false);
+    }
+  };
+
+  const handleDeleteEvent = async () => {
+    if (!deleteEventTarget) return;
+    setSavingEvent(true);
+    try {
+      await removeEnvironmentEvent(deleteEventTarget.id);
+      setDeleteEventTarget(null);
+    } finally {
+      setSavingEvent(false);
     }
   };
 
@@ -1744,32 +1833,103 @@ const EnvironmentPage = () => {
         {/* Sidebar */}
         <div className="w-full md:w-72 space-y-6">
           <Card>
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-sm font-medium">Próximos Eventos</CardTitle>
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={openCreateEvent} aria-label="Agregar evento">
+                <Plus className="h-4 w-4" />
+              </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="bg-green-100 p-2 rounded text-green-700">
-                  <Calendar className="h-4 w-4" />
+              {envEvents.length > 0 ? (
+                envEvents.map((event, index) => {
+                  const colors = EVENT_ICON_COLORS[index % EVENT_ICON_COLORS.length];
+                  return (
+                    <div key={event.id} className="flex items-start gap-3 group">
+                      <div className={`${colors.bg} p-2 rounded ${colors.text} shrink-0`}>
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold">{event.title}</p>
+                        <p className="text-[10px] text-muted-foreground">{formatEventDateTime(event.eventAt)}</p>
+                      </div>
+                      <div className="flex gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEvent(event)} aria-label="Editar evento">
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => setDeleteEventTarget(event)} aria-label="Eliminar evento">
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-4 text-xs text-muted-foreground border-2 border-dashed rounded-lg">
+                  No hay eventos programados.
                 </div>
-                <div>
-                  <p className="text-xs font-bold">Vacunación Anual</p>
-                  <p className="text-[10px] text-muted-foreground">Mañana, 09:00 AM</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <div className="bg-blue-100 p-2 rounded text-blue-700">
-                  <Calendar className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold">Visita Técnica INTA</p>
-                  <p className="text-[10px] text-muted-foreground">Jueves 15, 14:00 PM</p>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <Dialog open={eventDialogOpen} onOpenChange={setEventDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingEvent ? 'Editar evento' : 'Nuevo evento'}</DialogTitle>
+            <DialogDescription>
+              Programa un evento para este entorno formativo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Título</Label>
+              <Input
+                value={eventTitle}
+                onChange={(e) => setEventTitle(e.target.value)}
+                placeholder="Ej: Vacunación anual"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Fecha</Label>
+                <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Hora</Label>
+                <Input type="time" value={eventTime} onChange={(e) => setEventTime(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEventDialogOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={handleSaveEvent}
+              disabled={savingEvent || !eventTitle.trim() || !eventDate || !eventTime}
+              className="bg-green-700 hover:bg-green-800"
+            >
+              {savingEvent ? 'Guardando...' : editingEvent ? 'Guardar cambios' : 'Agregar evento'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteEventTarget} onOpenChange={(open) => !open && setDeleteEventTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Eliminar evento</DialogTitle>
+            <DialogDescription>
+              ¿Eliminar &quot;{deleteEventTarget?.title}&quot;? Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteEventTarget(null)}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleDeleteEvent} disabled={savingEvent}>
+              {savingEvent ? 'Eliminando...' : 'Eliminar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editEnvOpen} onOpenChange={(open) => { setEditEnvOpen(open); if (!open) setEditingEnvId(null); }}>
         <DialogContent>

@@ -7,6 +7,7 @@ import {
   EnvironmentInfo,
   FormativeEnvironment,
   InventoryItem,
+  Notice,
   Spreadsheet,
   Task,
 } from '../types';
@@ -17,17 +18,22 @@ interface AppContextValue {
   environments: FormativeEnvironment[];
   tasks: Task[];
   activities: Activity[];
+  notices: Notice[];
   spreadsheets: Spreadsheet[];
   environmentInfo: Record<string, EnvironmentInfo>;
   addTask: (task: Omit<Task, 'id' | 'completed'>) => Promise<void>;
   completeTask: (id: string, completedBy: string, durationMinutes: number) => Promise<void>;
   uncompleteTask: (id: string) => Promise<void>;
-  addActivity: (activity: Omit<Activity, 'id' | 'createdAt'>) => Promise<void>;
+  addActivity: (activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes'>) => Promise<void>;
+  completeActivity: (id: string, completedBy: string, durationMinutes: number) => Promise<void>;
+  uncompleteActivity: (id: string) => Promise<void>;
   updateActivity: (
     id: string,
     updates: Partial<Pick<Activity, 'title' | 'content' | 'author' | 'imageUrl'>>
   ) => Promise<void>;
   removeActivity: (id: string) => Promise<void>;
+  addNotice: (notice: Omit<Notice, 'id' | 'completed' | 'createdAt'>) => Promise<void>;
+  completeNotice: (id: string) => Promise<void>;
   updateEnvironmentInfo: (environmentId: string, updates: Partial<EnvironmentInfo>) => Promise<void>;
   addInventoryItem: (environmentId: string, item: Omit<InventoryItem, 'id'>) => Promise<void>;
   updateInventoryItem: (
@@ -67,6 +73,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [environments, setEnvironments] = useState<FormativeEnvironment[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([]);
   const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>([]);
   const [environmentInfo, setEnvironmentInfo] = useState<Record<string, EnvironmentInfo>>({});
 
@@ -90,6 +97,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setEnvironments(data.environments);
       setTasks(data.tasks);
       setActivities(data.activities);
+      setNotices(data.notices);
       setSpreadsheets(data.spreadsheets);
       setEnvironmentInfo(data.environmentInfo);
     } catch (err) {
@@ -135,9 +143,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
   };
 
-  const addActivity = async (activity: Omit<Activity, 'id' | 'createdAt'>) => {
+  const addActivity = async (
+    activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes'>
+  ) => {
     const created = await runMutation(() => api.insertActivity(activity));
     setActivities((prev) => [created, ...prev]);
+  };
+
+  const completeActivity = async (id: string, completedBy: string, durationMinutes: number) => {
+    const activity = activities.find((a) => a.id === id);
+    const envName = activity?.environmentName ?? getEnvironmentName(activity?.environmentId ?? '');
+    const updated = await runMutation(() =>
+      api.updateActivity(id, { completed: true, completedBy, durationMinutes }, envName)
+    );
+    setActivities((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  };
+
+  const uncompleteActivity = async (id: string) => {
+    const activity = activities.find((a) => a.id === id);
+    const envName = activity?.environmentName ?? getEnvironmentName(activity?.environmentId ?? '');
+    const updated = await runMutation(() =>
+      api.updateActivity(
+        id,
+        { completed: false, completedBy: undefined, durationMinutes: undefined },
+        envName
+      )
+    );
+    setActivities((prev) => prev.map((a) => (a.id === id ? updated : a)));
   };
 
   const updateActivity = async (
@@ -153,6 +185,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeActivity = async (id: string) => {
     await runMutation(() => api.deleteActivity(id));
     setActivities((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const addNotice = async (notice: Omit<Notice, 'id' | 'completed' | 'createdAt'>) => {
+    const created = await runMutation(() => api.insertNotice(notice));
+    setNotices((prev) => [created, ...prev]);
+  };
+
+  const completeNotice = async (id: string) => {
+    const updated = await runMutation(() => api.completeNotice(id));
+    setNotices((prev) => prev.map((n) => (n.id === id ? updated : n)));
   };
 
   const updateEnvironmentInfo = async (
@@ -263,6 +305,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setEnvironments((prev) => prev.filter((e) => !idsToRemove.has(e.id)));
     setTasks((prev) => prev.filter((t) => !idsToRemove.has(t.environmentId)));
     setActivities((prev) => prev.filter((a) => !idsToRemove.has(a.environmentId)));
+    setNotices((prev) =>
+      prev.filter((n) => !n.environmentId || !idsToRemove.has(n.environmentId))
+    );
     setSpreadsheets((prev) => prev.filter((s) => !idsToRemove.has(s.environmentId)));
     setEnvironmentInfo((prev) => {
       const next = { ...prev };
@@ -292,14 +337,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         environments,
         tasks,
         activities,
+        notices,
         spreadsheets,
         environmentInfo,
         addTask,
         completeTask,
         uncompleteTask,
         addActivity,
+        completeActivity,
+        uncompleteActivity,
         updateActivity,
         removeActivity,
+        addNotice,
+        completeNotice,
         updateEnvironmentInfo,
         addInventoryItem,
         updateInventoryItem,

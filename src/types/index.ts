@@ -19,6 +19,22 @@ export interface Activity {
   author: string;
   createdAt: string;
   imageUrl?: string;
+  completed: boolean;
+  completedBy?: string;
+  durationMinutes?: number;
+}
+
+export type NoticeImportance = 'normal' | 'important';
+
+export interface Notice {
+  id: string;
+  title: string;
+  content: string;
+  environmentId?: string;
+  importance: NoticeImportance;
+  completed: boolean;
+  completedBy?: string;
+  createdAt: string;
 }
 
 export interface Spreadsheet {

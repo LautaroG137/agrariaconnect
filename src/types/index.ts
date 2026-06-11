@@ -72,3 +72,11 @@ export interface EnvironmentInfo {
   status: string;
   inventory: InventoryItem[];
 }
+
+export interface EnvironmentEvent {
+  id: string;
+  environmentId: string;
+  title: string;
+  eventAt: string;
+  createdAt: string;
+}

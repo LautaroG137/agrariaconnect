@@ -10,6 +10,7 @@ import {
   Notice,
   Spreadsheet,
   Task,
+  EnvironmentEvent,
 } from '../types';
 
 interface AppContextValue {
@@ -19,6 +20,7 @@ interface AppContextValue {
   tasks: Task[];
   activities: Activity[];
   notices: Notice[];
+  events: EnvironmentEvent[];
   spreadsheets: Spreadsheet[];
   environmentInfo: Record<string, EnvironmentInfo>;
   addTask: (task: Omit<Task, 'id' | 'completed'>) => Promise<void>;
@@ -34,6 +36,12 @@ interface AppContextValue {
   removeActivity: (id: string) => Promise<void>;
   addNotice: (notice: Omit<Notice, 'id' | 'completed' | 'createdAt'>) => Promise<void>;
   completeNotice: (id: string) => Promise<void>;
+  addEnvironmentEvent: (event: Omit<EnvironmentEvent, 'id' | 'createdAt'>) => Promise<void>;
+  updateEnvironmentEvent: (
+    id: string,
+    updates: Partial<Pick<EnvironmentEvent, 'title' | 'eventAt'>>
+  ) => Promise<void>;
+  removeEnvironmentEvent: (id: string) => Promise<void>;
   updateEnvironmentInfo: (environmentId: string, updates: Partial<EnvironmentInfo>) => Promise<void>;
   addInventoryItem: (environmentId: string, item: Omit<InventoryItem, 'id'>) => Promise<void>;
   updateInventoryItem: (
@@ -74,6 +82,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
+  const [events, setEvents] = useState<EnvironmentEvent[]>([]);
   const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>([]);
   const [environmentInfo, setEnvironmentInfo] = useState<Record<string, EnvironmentInfo>>({});
 
@@ -98,6 +107,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTasks(data.tasks);
       setActivities(data.activities);
       setNotices(data.notices);
+      setEvents(data.events);
       setSpreadsheets(data.spreadsheets);
       setEnvironmentInfo(data.environmentInfo);
     } catch (err) {
@@ -195,6 +205,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const completeNotice = async (id: string) => {
     const updated = await runMutation(() => api.completeNotice(id));
     setNotices((prev) => prev.map((n) => (n.id === id ? updated : n)));
+  };
+
+  const addEnvironmentEvent = async (event: Omit<EnvironmentEvent, 'id' | 'createdAt'>) => {
+    const created = await runMutation(() => api.insertEnvironmentEvent(event));
+    setEvents((prev) => [...prev, created].sort(
+      (a, b) => new Date(a.eventAt).getTime() - new Date(b.eventAt).getTime()
+    ));
+  };
+
+  const updateEnvironmentEvent = async (
+    id: string,
+    updates: Partial<Pick<EnvironmentEvent, 'title' | 'eventAt'>>
+  ) => {
+    const updated = await runMutation(() => api.updateEnvironmentEvent(id, updates));
+    setEvents((prev) =>
+      prev
+        .map((e) => (e.id === id ? updated : e))
+        .sort((a, b) => new Date(a.eventAt).getTime() - new Date(b.eventAt).getTime())
+    );
+  };
+
+  const removeEnvironmentEvent = async (id: string) => {
+    await runMutation(() => api.deleteEnvironmentEvent(id));
+    setEvents((prev) => prev.filter((e) => e.id !== id));
   };
 
   const updateEnvironmentInfo = async (
@@ -308,6 +342,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNotices((prev) =>
       prev.filter((n) => !n.environmentId || !idsToRemove.has(n.environmentId))
     );
+    setEvents((prev) => prev.filter((e) => !idsToRemove.has(e.environmentId)));
     setSpreadsheets((prev) => prev.filter((s) => !idsToRemove.has(s.environmentId)));
     setEnvironmentInfo((prev) => {
       const next = { ...prev };
@@ -338,6 +373,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         tasks,
         activities,
         notices,
+        events,
         spreadsheets,
         environmentInfo,
         addTask,
@@ -350,6 +386,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeActivity,
         addNotice,
         completeNotice,
+        addEnvironmentEvent,
+        updateEnvironmentEvent,
+        removeEnvironmentEvent,
         updateEnvironmentInfo,
         addInventoryItem,
         updateInventoryItem,

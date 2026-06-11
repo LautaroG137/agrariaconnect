@@ -7,6 +7,7 @@ import {
   Notice,
   Spreadsheet,
   Task,
+  EnvironmentEvent,
 } from '../types';
 import { DEFAULT_ENVIRONMENT_INFO } from '../data';
 
@@ -58,6 +59,14 @@ type NoticeRow = {
   importance: Notice['importance'];
   completed: boolean;
   completed_by: string | null;
+  created_at: string;
+};
+
+type EnvironmentEventRow = {
+  id: string;
+  environment_id: string;
+  title: string;
+  event_at: string;
   created_at: string;
 };
 
@@ -140,6 +149,16 @@ function mapNotice(row: NoticeRow): Notice {
   };
 }
 
+function mapEnvironmentEvent(row: EnvironmentEventRow): EnvironmentEvent {
+  return {
+    id: row.id,
+    environmentId: row.environment_id,
+    title: row.title,
+    eventAt: row.event_at,
+    createdAt: row.created_at,
+  };
+}
+
 function mapSpreadsheet(row: SpreadsheetRow): Spreadsheet {
   return {
     id: row.id,
@@ -186,7 +205,7 @@ function buildEnvironmentInfoMap(
 export async function loadAppData() {
   const client = getClient();
 
-  const [envRes, detailsRes, inventoryRes, activitiesRes, tasksRes, spreadsheetsRes, noticesRes] =
+  const [envRes, detailsRes, inventoryRes, activitiesRes, tasksRes, spreadsheetsRes, noticesRes, eventsRes] =
     await Promise.all([
       client.from('environments').select('*').order('name'),
       client.from('environment_details').select('*'),
@@ -195,6 +214,7 @@ export async function loadAppData() {
       client.from('tasks').select('*').order('due_date'),
       client.from('spreadsheets').select('*').order('created_at', { ascending: false }),
       client.from('notices').select('*').order('created_at', { ascending: false }),
+      client.from('environment_events').select('*').order('event_at'),
     ]);
 
   if (envRes.error) throw envRes.error;
@@ -204,6 +224,7 @@ export async function loadAppData() {
   if (tasksRes.error) throw tasksRes.error;
   if (spreadsheetsRes.error) throw spreadsheetsRes.error;
   if (noticesRes.error) throw noticesRes.error;
+  if (eventsRes.error) throw eventsRes.error;
 
   const environments = (envRes.data as EnvironmentRow[]).map(mapEnvironment);
   const envNameById = Object.fromEntries(environments.map((e) => [e.id, e.name]));
@@ -220,6 +241,7 @@ export async function loadAppData() {
     tasks: (tasksRes.data as TaskRow[]).map(mapTask),
     spreadsheets: (spreadsheetsRes.data as SpreadsheetRow[]).map(mapSpreadsheet),
     notices: (noticesRes.data as NoticeRow[]).map(mapNotice),
+    events: (eventsRes.data as EnvironmentEventRow[]).map(mapEnvironmentEvent),
   };
 }
 
@@ -356,6 +378,50 @@ export async function completeNotice(id: string, completedBy?: string) {
 
   if (error) throw error;
   return mapNotice(data as NoticeRow);
+}
+
+export async function insertEnvironmentEvent(
+  event: Omit<EnvironmentEvent, 'id' | 'createdAt'>
+) {
+  const client = getClient();
+  const { data, error } = await client
+    .from('environment_events')
+    .insert({
+      environment_id: event.environmentId,
+      title: event.title,
+      event_at: event.eventAt,
+    })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return mapEnvironmentEvent(data as EnvironmentEventRow);
+}
+
+export async function updateEnvironmentEvent(
+  id: string,
+  updates: Partial<Pick<EnvironmentEvent, 'title' | 'eventAt'>>
+) {
+  const client = getClient();
+  const payload: Record<string, string> = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.eventAt !== undefined) payload.event_at = updates.eventAt;
+
+  const { data, error } = await client
+    .from('environment_events')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return mapEnvironmentEvent(data as EnvironmentEventRow);
+}
+
+export async function deleteEnvironmentEvent(id: string) {
+  const client = getClient();
+  const { error } = await client.from('environment_events').delete().eq('id', id);
+  if (error) throw error;
 }
 
 export async function upsertEnvironmentDetails(

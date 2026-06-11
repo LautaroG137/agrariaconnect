@@ -1,26 +1,19 @@
 import { BrowserRouter as Router, Routes, Route, Link, useParams } from 'react-router-dom';
 import { useState } from 'react';
 import { 
-  LayoutDashboard, 
   Sprout, 
   FileSpreadsheet, 
   Plus, 
   Search, 
-  Bell, 
-  User, 
   ArrowLeft,
   MessageSquare,
   Calendar,
   Share2,
-  Bird,
-  Leaf,
-  Milk,
-  Settings,
-  HelpCircle,
   CheckCircle2,
   Circle,
   Clock,
-  Trash2
+  Trash2,
+  Package
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -52,8 +45,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
-import { MOCK_ENVIRONMENTS, MOCK_ACTIVITIES, MOCK_SPREADSHEETS, MOCK_TASKS } from './data';
+import { MOCK_ENVIRONMENTS, MOCK_SPREADSHEETS, DEFAULT_ENVIRONMENT_INFO } from './data';
 import { iconMap } from './icons';
+import { useApp } from './context/AppContext';
 import { FormativeEnvironment, Activity, Spreadsheet, Task } from './types';
 
 // --- Components ---
@@ -167,112 +161,172 @@ const ActivityItem = ({ activity }: { activity: Activity; key?: string }) => (
   </Card>
 );
 
-const TaskItem = ({ task, onToggle }: { task: Task; onToggle: (id: string) => void; key?: string }) => (
-  <div className="flex items-center justify-between p-3 border rounded-lg bg-white hover:bg-slate-50 transition-colors mb-2">
-    <div className="flex items-center gap-3">
-      <button onClick={() => onToggle(task.id)} className="text-green-600">
-        {task.completed ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
-      </button>
-      <div className={task.completed ? 'line-through text-muted-foreground' : ''}>
-        <p className="text-sm font-medium">{task.title}</p>
-        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          <span>{new Date(task.dueDate).toLocaleDateString()}</span>
+const formatDuration = (minutes: number) => {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h} h ${m} min` : `${h} h`;
+};
+
+const TaskItem = ({
+  task,
+  onComplete,
+  onUncomplete,
+}: {
+  task: Task;
+  onComplete: (id: string, completedBy: string, durationMinutes: number) => void;
+  onUncomplete: (id: string) => void;
+  key?: string;
+}) => {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [completedBy, setCompletedBy] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState('');
+
+  const handleCircleClick = () => {
+    if (task.completed) {
+      onUncomplete(task.id);
+      return;
+    }
+    setCompletedBy('');
+    setDurationMinutes('');
+    setDialogOpen(true);
+  };
+
+  const handleConfirmComplete = () => {
+    const duration = parseInt(durationMinutes, 10);
+    if (!completedBy.trim() || !duration || duration <= 0) return;
+    onComplete(task.id, completedBy.trim(), duration);
+    setDialogOpen(false);
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between p-3 border rounded-lg bg-white hover:bg-slate-50 transition-colors mb-2">
+        <div className="flex items-center gap-3">
+          <button onClick={handleCircleClick} className="text-green-600 shrink-0">
+            {task.completed ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
+          </button>
+          <div className={task.completed ? 'line-through text-muted-foreground' : ''}>
+            <p className="text-sm font-medium">{task.title}</p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {new Date(task.dueDate).toLocaleDateString()}
+              </span>
+              {task.completed && task.completedBy && (
+                <span>Por: {task.completedBy}</span>
+              )}
+              {task.completed && task.durationMinutes != null && (
+                <span>Tiempo: {formatDuration(task.durationMinutes)}</span>
+              )}
+            </div>
+          </div>
         </div>
+        <Badge variant="outline" className={
+          task.priority === 'high' ? 'text-red-600 border-red-200 bg-red-50' :
+          task.priority === 'medium' ? 'text-orange-600 border-orange-200 bg-orange-50' :
+          'text-blue-600 border-blue-200 bg-blue-50'
+        }>
+          {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
+        </Badge>
       </div>
-    </div>
-    <Badge variant="outline" className={
-      task.priority === 'high' ? 'text-red-600 border-red-200 bg-red-50' :
-      task.priority === 'medium' ? 'text-orange-600 border-orange-200 bg-orange-50' :
-      'text-blue-600 border-blue-200 bg-blue-50'
-    }>
-      {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
-    </Badge>
-  </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Completar tarea</DialogTitle>
+            <DialogDescription>
+              Registra quién realizó la tarea y cuánto tiempo llevó.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Realizada por</Label>
+              <Input
+                value={completedBy}
+                onChange={(e) => setCompletedBy(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Tiempo empleado (minutos)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={durationMinutes}
+                onChange={(e) => setDurationMinutes(e.target.value)}
+                placeholder="Ej: 45"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleConfirmComplete} className="bg-green-700 hover:bg-green-800">
+              Marcar como terminada
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+};
+
+const TaskNoticeItem = ({ task, environmentName }: { task: Task; environmentName: string; key?: string }) => (
+  <Card className="mb-4 overflow-hidden border-l-4 border-l-orange-500">
+    <CardHeader className="pb-2">
+      <div className="flex items-center justify-between">
+        <Badge variant="secondary" className="bg-orange-50 text-orange-700 hover:bg-orange-100">
+          {environmentName}
+        </Badge>
+        <Badge variant="outline" className={
+          task.priority === 'high' ? 'text-red-600 border-red-200 bg-red-50' :
+          task.priority === 'medium' ? 'text-orange-600 border-orange-200 bg-orange-50' :
+          'text-blue-600 border-blue-200 bg-blue-50'
+        }>
+          {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
+        </Badge>
+      </div>
+      <CardTitle className="text-lg mt-2">{task.title}</CardTitle>
+    </CardHeader>
+    <CardContent>
+      <p className="text-sm text-muted-foreground flex items-center gap-1">
+        <Clock className="h-3 w-3" />
+        Vence: {new Date(task.dueDate).toLocaleDateString()}
+      </p>
+    </CardContent>
+  </Card>
 );
 
 // --- Pages ---
 
 const Dashboard = () => {
-  const [activities, setActivities] = useState<Activity[]>(MOCK_ACTIVITIES);
-  const [newActivity, setNewActivity] = useState({ title: '', content: '', envId: '' });
-
-  const handleAddActivity = () => {
-    if (!newActivity.title || !newActivity.content || !newActivity.envId) return;
-    
-    const env = MOCK_ENVIRONMENTS.find(e => e.id === newActivity.envId);
-    const activity: Activity = {
-      id: Math.random().toString(36).substr(2, 9),
-      environmentId: newActivity.envId,
-      environmentName: env?.name || 'Otro',
-      title: newActivity.title,
-      content: newActivity.content,
-      author: 'Usuario Actual',
-      createdAt: new Date().toISOString(),
-    };
-    
-    setActivities([activity, ...activities]);
-    setNewActivity({ title: '', content: '', envId: '' });
-  };
+  const { tasks, getEnvironmentName } = useApp();
+  const pendingTasks = tasks.filter((t) => !t.completed);
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex flex-col md:flex-row gap-8">
-        {/* Right Column: Avisos Feed - First on Mobile */}
+        {/* Right Column: Avisos - tareas pendientes */}
         <div className="w-full md:w-96 order-1 md:order-2">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold">Avisos</h2>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm">Publicar Aviso</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Nuevo Aviso</DialogTitle>
-                  <DialogDescription>Publica un aviso importante para los demás entornos.</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid gap-2">
-                    <Label>Entorno</Label>
-                    <Select onValueChange={(v) => setNewActivity({...newActivity, envId: v})}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar entorno" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MOCK_ENVIRONMENTS.map(e => (
-                          <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>Título del Aviso</Label>
-                    <Input 
-                      value={newActivity.title} 
-                      onChange={(e) => setNewActivity({...newActivity, title: e.target.value})}
-                      placeholder="Ej: Reunión de profesores, Falta de insumos..." 
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>Mensaje</Label>
-                    <Textarea 
-                      value={newActivity.content}
-                      onChange={(e) => setNewActivity({...newActivity, content: e.target.value})}
-                      placeholder="Escribe el contenido del aviso..." 
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button onClick={handleAddActivity} className="bg-green-700 hover:bg-green-800">Publicar Aviso</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <Badge variant="outline">{pendingTasks.length} pendientes</Badge>
           </div>
           
           <ScrollArea className="h-[calc(100vh-250px)] pr-4">
-            {activities.map(activity => (
-              <ActivityItem key={activity.id} activity={activity} />
-            ))}
+            {pendingTasks.length > 0 ? (
+              pendingTasks.map((task) => (
+                <TaskNoticeItem
+                  key={task.id}
+                  task={task}
+                  environmentName={getEnvironmentName(task.environmentId)}
+                />
+              ))
+            ) : (
+              <div className="text-center py-12 border-2 border-dashed rounded-xl text-muted-foreground">
+                No hay tareas pendientes.
+              </div>
+            )}
           </ScrollArea>
         </div>
 
@@ -340,15 +394,35 @@ const EnvironmentPage = () => {
   const { id } = useParams();
   const env = MOCK_ENVIRONMENTS.find(e => e.id === id);
   const Icon = env ? (iconMap as any)[env.icon] : iconMap.HelpCircle;
-  
-  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS.filter(t => t.environmentId === id));
+
+  const {
+    tasks,
+    activities,
+    environmentInfo,
+    addTask,
+    completeTask,
+    uncompleteTask,
+    addActivity,
+    updateEnvironmentInfo,
+    addInventoryItem,
+    updateInventoryItem,
+    removeInventoryItem,
+  } = useApp();
+
+  const envTasks = tasks.filter((t) => t.environmentId === id);
+  const localActivities = activities.filter((a) => a.environmentId === id);
+  const info = environmentInfo[id!] ?? DEFAULT_ENVIRONMENT_INFO;
+
   const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>(MOCK_SPREADSHEETS.filter(s => s.environmentId === id));
-  const [localActivities, setLocalActivities] = useState<Activity[]>(MOCK_ACTIVITIES.filter(a => a.environmentId === id));
   const [subEnvironments, setSubEnvironments] = useState<FormativeEnvironment[]>(MOCK_ENVIRONMENTS.filter(e => e.parentId === id));
   
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [newTaskDate, setNewTaskDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [newActivityTitle, setNewActivityTitle] = useState('');
+  const [newActivityContent, setNewActivityContent] = useState('');
+  const [newActivityAuthor, setNewActivityAuthor] = useState('');
 
   const [newSheetTitle, setNewSheetTitle] = useState('');
   const [newSheetCols, setNewSheetCols] = useState('');
@@ -357,48 +431,47 @@ const EnvironmentPage = () => {
   const [newSubEnvName, setNewSubEnvName] = useState('');
   const [newSubEnvDesc, setNewSubEnvDesc] = useState('');
 
+  const [newInvName, setNewInvName] = useState('');
+  const [newInvQuantity, setNewInvQuantity] = useState('');
+  const [newInvUnit, setNewInvUnit] = useState('');
+  const [newInvNotes, setNewInvNotes] = useState('');
+
   if (!env) return <div>Entorno no encontrado</div>;
 
+  const handleAddActivityManual = () => {
+    if (!newActivityTitle.trim() || !newActivityContent.trim()) return;
+    addActivity({
+      environmentId: id!,
+      environmentName: env.name,
+      title: newActivityTitle.trim(),
+      content: newActivityContent.trim(),
+      author: newActivityAuthor.trim() || 'Usuario Actual',
+    });
+    setNewActivityTitle('');
+    setNewActivityContent('');
+    setNewActivityAuthor('');
+  };
+
   const handleAddActivity = (title: string, content: string) => {
-    const activity: Activity = {
-      id: Math.random().toString(36).substr(2, 9),
+    addActivity({
       environmentId: id!,
       environmentName: env.name,
       title,
       content,
       author: 'Usuario Actual',
-      createdAt: new Date().toISOString(),
-    };
-    setLocalActivities([activity, ...localActivities]);
+    });
   };
 
   const handleAddTask = () => {
     if (!newTaskTitle) return;
-    const task: Task = {
-      id: Math.random().toString(36).substr(2, 9),
+    addTask({
       environmentId: id!,
       title: newTaskTitle,
       dueDate: new Date(newTaskDate).toISOString(),
-      completed: false,
       priority: newTaskPriority,
-    };
-    setTasks([...tasks, task]);
-
-    handleAddTaskActivity(newTaskTitle, newTaskDate, newTaskPriority);
-
+    });
     setNewTaskTitle('');
     setNewTaskDate(new Date().toISOString().split('T')[0]);
-  };
-
-  const handleAddTaskActivity = (title: string, date: string, priority: string) => {
-    handleAddActivity(
-      `Nueva Tarea: ${title}`,
-      `Se ha programado una nueva tarea para el día ${new Date(date).toLocaleDateString()}. Prioridad: ${priority === 'high' ? 'Alta' : priority === 'medium' ? 'Media' : 'Baja'}.`
-    );
-  };
-
-  const toggleTask = (taskId: string) => {
-    setTasks(tasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t));
   };
 
   const handleCreateSheet = () => {
@@ -512,6 +585,53 @@ const EnvironmentPage = () => {
             </TabsList>
             
             <TabsContent value="actividades">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-semibold">Actividades del entorno</h3>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button className="bg-green-700 hover:bg-green-800">
+                      <Plus className="mr-2 h-4 w-4" /> Nueva Actividad
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Registrar actividad</DialogTitle>
+                      <DialogDescription>Documenta una actividad realizada en este entorno.</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid gap-2">
+                        <Label>Título</Label>
+                        <Input
+                          value={newActivityTitle}
+                          onChange={(e) => setNewActivityTitle(e.target.value)}
+                          placeholder="Ej: Cosecha de hortalizas"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Descripción</Label>
+                        <Textarea
+                          value={newActivityContent}
+                          onChange={(e) => setNewActivityContent(e.target.value)}
+                          placeholder="Detalle de la actividad realizada..."
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Realizada por (opcional)</Label>
+                        <Input
+                          value={newActivityAuthor}
+                          onChange={(e) => setNewActivityAuthor(e.target.value)}
+                          placeholder="Ej: Alumno García"
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={handleAddActivityManual} className="bg-green-700 hover:bg-green-800">
+                        Guardar actividad
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
               <div className="grid grid-cols-1 gap-4">
                 {localActivities.map(a => (
                   <ActivityItem key={a.id} activity={a} />
@@ -631,9 +751,14 @@ const EnvironmentPage = () => {
                   </Dialog>
                 </CardHeader>
                 <CardContent>
-                  {tasks.length > 0 ? (
-                    tasks.map(t => (
-                      <TaskItem key={t.id} task={t} onToggle={toggleTask} />
+                  {envTasks.length > 0 ? (
+                    envTasks.map(t => (
+                      <TaskItem
+                        key={t.id}
+                        task={t}
+                        onComplete={completeTask}
+                        onUncomplete={uncompleteTask}
+                      />
                     ))
                   ) : (
                     <div className="text-center py-8 text-muted-foreground italic">
@@ -757,25 +882,200 @@ const EnvironmentPage = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Detalles del Entorno</CardTitle>
+                  <CardDescription>Edita la información general y el inventario.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Responsable</p>
-                      <p>Ing. Agr. Ricardo López</p>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label>Responsable</Label>
+                      <Input
+                        value={info.responsible}
+                        onChange={(e) => updateEnvironmentInfo(id!, { responsible: e.target.value })}
+                        placeholder="Nombre del responsable"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Ubicación</p>
-                      <p>Sector Norte - Lote 4</p>
+                    <div className="grid gap-2">
+                      <Label>Ubicación</Label>
+                      <Input
+                        value={info.location}
+                        onChange={(e) => updateEnvironmentInfo(id!, { location: e.target.value })}
+                        placeholder="Ubicación del entorno"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Horario de Actividad</p>
-                      <p>Lunes a Viernes 08:00 - 12:00</p>
+                    <div className="grid gap-2">
+                      <Label>Horario de actividad</Label>
+                      <Input
+                        value={info.schedule}
+                        onChange={(e) => updateEnvironmentInfo(id!, { schedule: e.target.value })}
+                        placeholder="Ej: Lunes a Viernes 08:00 - 12:00"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Estado</p>
-                      <Badge className="bg-green-100 text-green-700 border-green-200">Activo</Badge>
+                    <div className="grid gap-2">
+                      <Label>Estado</Label>
+                      <Select
+                        value={info.status}
+                        onValueChange={(v) => updateEnvironmentInfo(id!, { status: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Activo">Activo</SelectItem>
+                          <SelectItem value="En mantenimiento">En mantenimiento</SelectItem>
+                          <SelectItem value="Inactivo">Inactivo</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5 text-green-700" />
+                        <h3 className="text-lg font-semibold">Inventario</h3>
+                      </div>
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button size="sm" variant="outline">
+                            <Plus className="h-4 w-4 mr-1" /> Agregar ítem
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Nuevo ítem de inventario</DialogTitle>
+                          </DialogHeader>
+                          <div className="grid gap-4 py-4">
+                            <div className="grid gap-2">
+                              <Label>Nombre</Label>
+                              <Input
+                                value={newInvName}
+                                onChange={(e) => setNewInvName(e.target.value)}
+                                placeholder="Ej: Alimento balanceado"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="grid gap-2">
+                                <Label>Cantidad</Label>
+                                <Input
+                                  value={newInvQuantity}
+                                  onChange={(e) => setNewInvQuantity(e.target.value)}
+                                  placeholder="Ej: 120"
+                                />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label>Unidad</Label>
+                                <Input
+                                  value={newInvUnit}
+                                  onChange={(e) => setNewInvUnit(e.target.value)}
+                                  placeholder="Ej: kg"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid gap-2">
+                              <Label>Notas (opcional)</Label>
+                              <Input
+                                value={newInvNotes}
+                                onChange={(e) => setNewInvNotes(e.target.value)}
+                                placeholder="Observaciones..."
+                              />
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button
+                              onClick={() => {
+                                if (!newInvName.trim() || !newInvQuantity.trim()) return;
+                                addInventoryItem(id!, {
+                                  name: newInvName.trim(),
+                                  quantity: newInvQuantity.trim(),
+                                  unit: newInvUnit.trim() || 'unidades',
+                                  notes: newInvNotes.trim() || undefined,
+                                });
+                                setNewInvName('');
+                                setNewInvQuantity('');
+                                setNewInvUnit('');
+                                setNewInvNotes('');
+                              }}
+                              className="bg-green-700 hover:bg-green-800"
+                            >
+                              Agregar
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+
+                    {info.inventory.length > 0 ? (
+                      <div className="rounded-md border overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Ítem</TableHead>
+                              <TableHead>Cantidad</TableHead>
+                              <TableHead>Unidad</TableHead>
+                              <TableHead>Notas</TableHead>
+                              <TableHead className="w-12"></TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {info.inventory.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell className="p-1">
+                                  <Input
+                                    className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
+                                    value={item.name}
+                                    onChange={(e) =>
+                                      updateInventoryItem(id!, item.id, { name: e.target.value })
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="p-1">
+                                  <Input
+                                    className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      updateInventoryItem(id!, item.id, { quantity: e.target.value })
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="p-1">
+                                  <Input
+                                    className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
+                                    value={item.unit}
+                                    onChange={(e) =>
+                                      updateInventoryItem(id!, item.id, { unit: e.target.value })
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="p-1">
+                                  <Input
+                                    className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
+                                    value={item.notes ?? ''}
+                                    onChange={(e) =>
+                                      updateInventoryItem(id!, item.id, { notes: e.target.value })
+                                    }
+                                    placeholder="..."
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-red-500 hover:text-red-700"
+                                    onClick={() => removeInventoryItem(id!, item.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 border-2 border-dashed rounded-xl text-muted-foreground">
+                        No hay ítems en el inventario. Agrega el primero.
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -783,28 +1083,8 @@ const EnvironmentPage = () => {
           </Tabs>
         </div>
 
-        {/* Sidebar Stats */}
+        {/* Sidebar */}
         <div className="w-full md:w-72 space-y-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Estadísticas Rápidas</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Actividades este mes</span>
-                <span className="font-bold">24</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Alumnos asignados</span>
-                <span className="font-bold">18</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Planillas activas</span>
-                <span className="font-bold">5</span>
-              </div>
-            </CardContent>
-          </Card>
-          
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">Próximos Eventos</CardTitle>

@@ -1,4 +1,4 @@
-import { FormativeEnvironment, Activity, Spreadsheet, Task } from './types';
+import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentInfo } from './types';
 
 export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
   {
@@ -111,7 +111,57 @@ export const MOCK_TASKS: Task[] = [
     environmentId: '2',
     title: 'Riego por goteo - Sector A',
     dueDate: new Date().toISOString(),
-    completed: true,
+    completed: false,
     priority: 'medium',
   },
 ];
+
+export const MOCK_ENVIRONMENT_INFO: Record<string, EnvironmentInfo> = {
+  '1': {
+    responsible: 'Ing. Agr. Ricardo López',
+    location: 'Sector Norte - Galpón 1',
+    schedule: 'Lunes a Viernes 08:00 - 12:00',
+    status: 'Activo',
+    inventory: [
+      { id: 'inv1', name: 'Alimento balanceado', quantity: '120', unit: 'kg', notes: 'Stock mensual' },
+      { id: 'inv2', name: 'Bebederos', quantity: '24', unit: 'unidades' },
+    ],
+  },
+  '2': {
+    responsible: 'Prof. Martínez',
+    location: 'Sector Sur - Lote 4',
+    schedule: 'Lunes a Viernes 07:00 - 11:00',
+    status: 'Activo',
+    inventory: [
+      { id: 'inv3', name: 'Semillas de lechuga', quantity: '5', unit: 'sobres' },
+      { id: 'inv4', name: 'Mangueras de riego', quantity: '8', unit: 'unidades' },
+    ],
+  },
+  '3': {
+    responsible: 'Téc. Fernández',
+    location: 'Sala de ordeñe',
+    schedule: 'Todos los días 05:00 - 08:00',
+    status: 'Activo',
+    inventory: [
+      { id: 'inv5', name: 'Desinfectante ubre', quantity: '10', unit: 'litros' },
+    ],
+  },
+  '4': {
+    responsible: 'Prof. Díaz',
+    location: 'Taller de maquinaria',
+    schedule: 'Martes y Jueves 14:00 - 17:00',
+    status: 'Activo',
+    inventory: [
+      { id: 'inv6', name: 'Aceite hidráulico', quantity: '20', unit: 'litros' },
+      { id: 'inv7', name: 'Filtros de aire', quantity: '6', unit: 'unidades' },
+    ],
+  },
+};
+
+export const DEFAULT_ENVIRONMENT_INFO: EnvironmentInfo = {
+  responsible: '',
+  location: '',
+  schedule: '',
+  status: 'Activo',
+  inventory: [],
+};

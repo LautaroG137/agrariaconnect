@@ -37,4 +37,22 @@ export interface Task {
   dueDate: string;
   completed: boolean;
   priority: 'low' | 'medium' | 'high';
+  completedBy?: string;
+  durationMinutes?: number;
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  quantity: string;
+  unit: string;
+  notes?: string;
+}
+
+export interface EnvironmentInfo {
+  responsible: string;
+  location: string;
+  schedule: string;
+  status: string;
+  inventory: InventoryItem[];
 }

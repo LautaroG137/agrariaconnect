@@ -1,3 +1,5 @@
+import { createLucideIcon } from 'lucide-react';
+import { bee, cowHead, pigHead } from '@lucide/lab';
 import {
   Apple,
   Bird,
@@ -19,6 +21,10 @@ import {
   Wrench,
 } from 'lucide-react';
 
+const Bee = createLucideIcon('bee', bee);
+const PigHead = createLucideIcon('pig-head', pigHead);
+const CowHead = createLucideIcon('cow-head', cowHead);
+
 export const iconMap = {
   Bird,
   Leaf,
@@ -38,12 +44,18 @@ export const iconMap = {
   Hammer,
   Wrench,
   Warehouse,
+  Bee,
+  PigHead,
+  CowHead,
 };
 
 export type EnvironmentIconKey = keyof typeof iconMap;
 
 export const ENV_ICON_OPTIONS: { key: EnvironmentIconKey; label: string }[] = [
   { key: 'Bird', label: 'Aves' },
+  { key: 'PigHead', label: 'Porcino' },
+  { key: 'CowHead', label: 'Vaca' },
+  { key: 'Bee', label: 'Abeja' },
   { key: 'Rabbit', label: 'Conejos' },
   { key: 'Fish', label: 'Pesca' },
   { key: 'Milk', label: 'Tambo' },

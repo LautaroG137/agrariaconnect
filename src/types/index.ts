@@ -8,6 +8,7 @@ export interface FormativeEnvironment {
   icon: string;
   color: string;
   parentId?: string;
+  password: string;
 }
 
 export interface Activity {

@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Sprout, 
   FileSpreadsheet, 
@@ -13,7 +13,9 @@ import {
   Clock,
   Trash2,
   Package,
-  Pencil
+  Pencil,
+  Lock,
+  KeyRound
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -45,7 +47,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDistanceToNow, format, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
-import { DEFAULT_ENVIRONMENT_INFO } from './data';
+import { DEFAULT_ENVIRONMENT_INFO, DEFAULT_ENV_PASSWORD } from './data';
 import { iconMap, ENV_ICON_OPTIONS, isEnvironmentIconKey, DEFAULT_ENV_ICON } from './icons';
 import { useApp } from './context/AppContext';
 import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent } from './types';
@@ -152,12 +154,113 @@ const Navbar = () => (
   </nav>
 );
 
+const unlockedEnvKey = (id: string) => `env-unlocked:${id}`;
+
+const isEnvironmentUnlocked = (id: string) => {
+  try {
+    return sessionStorage.getItem(unlockedEnvKey(id)) === '1';
+  } catch {
+    return false;
+  }
+};
+
+const unlockEnvironment = (id: string) => {
+  try {
+    sessionStorage.setItem(unlockedEnvKey(id), '1');
+  } catch {
+    // ignore
+  }
+};
+
+const PasswordPromptDialog = ({
+  open,
+  onOpenChange,
+  title,
+  description,
+  expectedPassword,
+  onSuccess,
+  confirmLabel = 'Continuar',
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description?: string;
+  expectedPassword: string;
+  onSuccess: () => void;
+  confirmLabel?: string;
+}) => {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleConfirm = () => {
+    if (password !== (expectedPassword || DEFAULT_ENV_PASSWORD)) {
+      setError('Contraseña incorrecta');
+      return;
+    }
+    setPassword('');
+    setError('');
+    onOpenChange(false);
+    onSuccess();
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          setPassword('');
+          setError('');
+        }
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Lock className="h-5 w-5 text-green-700" />
+            {title}
+          </DialogTitle>
+          {description && <DialogDescription>{description}</DialogDescription>}
+        </DialogHeader>
+        <div className="grid gap-4 py-2">
+          <div className="grid gap-2">
+            <Label htmlFor="env-password">Contraseña</Label>
+            <Input
+              id="env-password"
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirm();
+              }}
+              placeholder="Ingresá la contraseña"
+              autoFocus
+            />
+            {error && <p className="text-sm text-red-600">{error}</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={handleConfirm} className="bg-green-700 hover:bg-green-800">
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const EnvironmentCard = ({
   env,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   env: FormativeEnvironment;
+  onOpen: (env: FormativeEnvironment) => void;
   onEdit?: (env: FormativeEnvironment) => void;
   onDelete?: (env: FormativeEnvironment) => void;
   key?: string;
@@ -178,7 +281,10 @@ const EnvironmentCard = ({
                 size="icon"
                 variant="secondary"
                 className="h-8 w-8 bg-white/90 shadow-sm"
-                onClick={() => onEdit(env)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(env);
+                }}
                 aria-label="Editar entorno"
               >
                 <Pencil className="h-4 w-4" />
@@ -190,7 +296,10 @@ const EnvironmentCard = ({
                 size="icon"
                 variant="secondary"
                 className="h-8 w-8 bg-white/90 shadow-sm text-red-600 hover:text-red-700"
-                onClick={() => onDelete(env)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(env);
+                }}
                 aria-label="Eliminar entorno"
               >
                 <Trash2 className="h-4 w-4" />
@@ -198,7 +307,7 @@ const EnvironmentCard = ({
             )}
           </div>
         )}
-        <Link to={`/entorno/${env.id}`} className="block">
+        <button type="button" onClick={() => onOpen(env)} className="block w-full text-left">
           <CardHeader className={`${env.color} border-b`}>
             <div className="flex items-center justify-between">
               <Icon className="h-8 w-8" />
@@ -215,15 +324,15 @@ const EnvironmentCard = ({
           </CardContent>
           <CardFooter className="flex justify-between text-xs text-muted-foreground border-t pt-4">
             <div className="flex items-center gap-1">
-              <MessageSquare className="h-3 w-3" />
-              <span>12 Actividades</span>
+              <Lock className="h-3 w-3" />
+              <span>Protegido</span>
             </div>
             <div className="flex items-center gap-1">
               <FileSpreadsheet className="h-3 w-3" />
-              <span>3 Planillas</span>
+              <span>Ver entorno</span>
             </div>
           </CardFooter>
-        </Link>
+        </button>
       </Card>
     </motion.div>
   );
@@ -640,6 +749,7 @@ const NoticeItem = ({
 // --- Pages ---
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const {
     notices,
     environments,
@@ -676,6 +786,10 @@ const Dashboard = () => {
 
   const [editEnv, setEditEnv] = useState<FormativeEnvironment | null>(null);
   const [deleteEnv, setDeleteEnv] = useState<FormativeEnvironment | null>(null);
+  const [passwordAuth, setPasswordAuth] = useState<{
+    env: FormativeEnvironment;
+    action: 'enter' | 'edit' | 'delete';
+  } | null>(null);
 
   const handleCreateEnvironment = async () => {
     if (!newEnvName.trim()) return;
@@ -688,6 +802,7 @@ const Dashboard = () => {
         type: newEnvType,
         icon: newEnvIcon,
         color: style.color,
+        password: DEFAULT_ENV_PASSWORD,
       });
       setNewEnvName('');
       setNewEnvDesc('');
@@ -699,12 +814,46 @@ const Dashboard = () => {
     }
   };
 
+  const requestOpenEnvironment = (env: FormativeEnvironment) => {
+    if (isEnvironmentUnlocked(env.id)) {
+      navigate(`/entorno/${env.id}`);
+      return;
+    }
+    setPasswordAuth({ env, action: 'enter' });
+  };
+
+  const requestEditEnvironment = (env: FormativeEnvironment) => {
+    setPasswordAuth({ env, action: 'edit' });
+  };
+
+  const requestDeleteEnvironment = (env: FormativeEnvironment) => {
+    setPasswordAuth({ env, action: 'delete' });
+  };
+
   const openEditEnvironment = (env: FormativeEnvironment) => {
     setEditEnv(env);
     setNewEnvName(env.name);
     setNewEnvDesc(env.description);
     setNewEnvType(env.type);
     setNewEnvIcon(isEnvironmentIconKey(env.icon) ? env.icon : DEFAULT_ENV_ICON);
+  };
+
+  const handlePasswordSuccess = () => {
+    if (!passwordAuth) return;
+    const { env, action } = passwordAuth;
+    setPasswordAuth(null);
+    if (action === 'enter') {
+      unlockEnvironment(env.id);
+      navigate(`/entorno/${env.id}`);
+      return;
+    }
+    if (action === 'edit') {
+      openEditEnvironment(env);
+      return;
+    }
+    if (action === 'delete') {
+      setDeleteEnv(env);
+    }
   };
 
   const handleUpdateEnvironment = async () => {
@@ -952,8 +1101,9 @@ const Dashboard = () => {
               <EnvironmentCard
                 key={env.id}
                 env={env}
-                onEdit={openEditEnvironment}
-                onDelete={setDeleteEnv}
+                onOpen={requestOpenEnvironment}
+                onEdit={requestEditEnvironment}
+                onDelete={requestDeleteEnvironment}
               />
             ))}
           </div>
@@ -1029,6 +1179,32 @@ const Dashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PasswordPromptDialog
+        open={!!passwordAuth}
+        onOpenChange={(open) => !open && setPasswordAuth(null)}
+        title={
+          passwordAuth?.action === 'enter'
+            ? `Entrar a ${passwordAuth.env.name}`
+            : passwordAuth?.action === 'edit'
+              ? `Editar ${passwordAuth.env.name}`
+              : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
+        }
+        description={
+          passwordAuth?.action === 'enter'
+            ? 'Ingresá la contraseña del entorno para continuar.'
+            : 'Confirmá la contraseña del entorno para realizar esta acción.'
+        }
+        expectedPassword={passwordAuth?.env.password || DEFAULT_ENV_PASSWORD}
+        onSuccess={handlePasswordSuccess}
+        confirmLabel={
+          passwordAuth?.action === 'enter'
+            ? 'Entrar'
+            : passwordAuth?.action === 'edit'
+              ? 'Continuar'
+              : 'Confirmar'
+        }
+      />
     </div>
   );
 };
@@ -1123,8 +1299,57 @@ const EnvironmentPage = () => {
   const [savingEvent, setSavingEvent] = useState(false);
   const [deleteEventTarget, setDeleteEventTarget] = useState<EnvironmentEvent | null>(null);
 
+  const [accessGranted, setAccessGranted] = useState(false);
+  const [gatePassword, setGatePassword] = useState('');
+  const [gateError, setGateError] = useState('');
+  const [passwordAuth, setPasswordAuth] = useState<{
+    env: FormativeEnvironment;
+    action: 'edit' | 'delete' | 'enter-sub';
+  } | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [changePasswordError, setChangePasswordError] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      setAccessGranted(isEnvironmentUnlocked(id));
+      setGatePassword('');
+      setGateError('');
+    }
+  }, [id]);
+
   if (loading) return <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">Cargando entorno...</div>;
   if (!env) return <div>Entorno no encontrado</div>;
+
+  const handleGateUnlock = () => {
+    if (gatePassword !== (env.password || DEFAULT_ENV_PASSWORD)) {
+      setGateError('Contraseña incorrecta');
+      return;
+    }
+    unlockEnvironment(env.id);
+    setAccessGranted(true);
+    setGatePassword('');
+    setGateError('');
+  };
+
+  const requestEditEnv = (target: FormativeEnvironment = env) => {
+    setPasswordAuth({ env: target, action: 'edit' });
+  };
+
+  const requestDeleteEnv = (target: FormativeEnvironment = env) => {
+    setPasswordAuth({ env: target, action: 'delete' });
+  };
+
+  const requestOpenSubEnv = (sub: FormativeEnvironment) => {
+    if (isEnvironmentUnlocked(sub.id)) {
+      navigate(`/entorno/${sub.id}`);
+      return;
+    }
+    setPasswordAuth({ env: sub, action: 'enter-sub' });
+  };
 
   const openEditEnvDialog = (target: FormativeEnvironment = env) => {
     setEditingEnvId(target.id);
@@ -1133,6 +1358,54 @@ const EnvironmentPage = () => {
     setEditEnvType(target.type);
     setEditEnvIcon(isEnvironmentIconKey(target.icon) ? target.icon : DEFAULT_ENV_ICON);
     setEditEnvOpen(true);
+  };
+
+  const handlePasswordAuthSuccess = () => {
+    if (!passwordAuth) return;
+    const { env: target, action } = passwordAuth;
+    setPasswordAuth(null);
+    if (action === 'enter-sub') {
+      unlockEnvironment(target.id);
+      navigate(`/entorno/${target.id}`);
+      return;
+    }
+    if (action === 'edit') {
+      openEditEnvDialog(target);
+      return;
+    }
+    if (action === 'delete') {
+      if (target.id === id) {
+        setDeleteEnvOpen(true);
+      } else {
+        removeEnvironment(target.id);
+      }
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (currentPasswordInput !== (env.password || DEFAULT_ENV_PASSWORD)) {
+      setChangePasswordError('La contraseña actual no es correcta');
+      return;
+    }
+    if (!newPasswordInput.trim()) {
+      setChangePasswordError('Ingresá una contraseña nueva');
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setChangePasswordError('Las contraseñas nuevas no coinciden');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await updateEnvironment(env.id, { password: newPasswordInput.trim() });
+      setChangePasswordOpen(false);
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+      setChangePasswordError('');
+    } finally {
+      setSavingPassword(false);
+    }
   };
 
   const handleUpdateEnv = async () => {
@@ -1311,6 +1584,7 @@ const EnvironmentPage = () => {
       type: env.type,
       icon: env.icon,
       color: env.color.replace('100', '50').replace('700', '600').replace('200', '100'),
+      password: DEFAULT_ENV_PASSWORD,
     });
     
     await handleAddActivity(
@@ -1321,6 +1595,52 @@ const EnvironmentPage = () => {
     setNewSubEnvName('');
     setNewSubEnvDesc('');
   };
+
+  if (!accessGranted) {
+    return (
+      <div className="container mx-auto px-4 py-16 max-w-md">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5 text-green-700" />
+              Acceso a {env.name}
+            </CardTitle>
+            <CardDescription>
+              Este entorno está protegido. Ingresá la contraseña para continuar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="gate-password">Contraseña</Label>
+              <Input
+                id="gate-password"
+                type="password"
+                value={gatePassword}
+                onChange={(e) => {
+                  setGatePassword(e.target.value);
+                  setGateError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleGateUnlock();
+                }}
+                placeholder="Ingresá la contraseña"
+                autoFocus
+              />
+              {gateError && <p className="text-sm text-red-600">{gateError}</p>}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => navigate(env.parentId ? `/entorno/${env.parentId}` : '/')}>
+                Volver
+              </Button>
+              <Button className="flex-1 bg-green-700 hover:bg-green-800" onClick={handleGateUnlock}>
+                Entrar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -1346,8 +1666,11 @@ const EnvironmentPage = () => {
               <h1 className="text-4xl font-bold">{env.name}</h1>
               <p className="text-muted-foreground">{env.description}</p>
             </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => openEditEnvDialog()}>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setChangePasswordOpen(true)}>
+                <KeyRound className="h-4 w-4 mr-1" /> Contraseña
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => requestEditEnv()}>
                 <Pencil className="h-4 w-4 mr-1" /> Editar
               </Button>
               <Button
@@ -1355,7 +1678,7 @@ const EnvironmentPage = () => {
                 variant="outline"
                 size="sm"
                 className="text-red-600 hover:text-red-700"
-                onClick={() => setDeleteEnvOpen(true)}
+                onClick={() => requestDeleteEnv()}
               >
                 <Trash2 className="h-4 w-4 mr-1" /> Eliminar
               </Button>
@@ -1482,12 +1805,9 @@ const EnvironmentPage = () => {
                     <EnvironmentCard
                       key={sub.id}
                       env={sub}
-                      onEdit={openEditEnvDialog}
-                      onDelete={(subEnv) => {
-                        if (window.confirm(`¿Eliminar "${subEnv.name}" y todo su contenido?`)) {
-                          removeEnvironment(subEnv.id);
-                        }
-                      }}
+                      onOpen={requestOpenSubEnv}
+                      onEdit={requestEditEnv}
+                      onDelete={requestDeleteEnv}
                     />
                   ))}
                   {subEnvironments.length === 0 && (
@@ -2054,6 +2374,96 @@ const EnvironmentPage = () => {
             <Button variant="outline" onClick={() => setDeleteEnvOpen(false)}>Cancelar</Button>
             <Button variant="destructive" onClick={handleDeleteEnv} disabled={savingEnvAction}>
               {savingEnvAction ? 'Eliminando...' : 'Eliminar entorno'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <PasswordPromptDialog
+        open={!!passwordAuth}
+        onOpenChange={(open) => !open && setPasswordAuth(null)}
+        title={
+          passwordAuth?.action === 'enter-sub'
+            ? `Entrar a ${passwordAuth.env.name}`
+            : passwordAuth?.action === 'edit'
+              ? `Editar ${passwordAuth.env.name}`
+              : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
+        }
+        description="Confirmá la contraseña del entorno para continuar."
+        expectedPassword={passwordAuth?.env.password || DEFAULT_ENV_PASSWORD}
+        onSuccess={handlePasswordAuthSuccess}
+        confirmLabel={passwordAuth?.action === 'enter-sub' ? 'Entrar' : 'Continuar'}
+      />
+
+      <Dialog
+        open={changePasswordOpen}
+        onOpenChange={(open) => {
+          setChangePasswordOpen(open);
+          if (!open) {
+            setCurrentPasswordInput('');
+            setNewPasswordInput('');
+            setConfirmPasswordInput('');
+            setChangePasswordError('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-green-700" />
+              Cambiar contraseña
+            </DialogTitle>
+            <DialogDescription>
+              Actualizá la contraseña de acceso de &quot;{env.name}&quot;.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Contraseña actual</Label>
+              <Input
+                type="password"
+                value={currentPasswordInput}
+                onChange={(e) => {
+                  setCurrentPasswordInput(e.target.value);
+                  setChangePasswordError('');
+                }}
+                placeholder="Contraseña actual"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Contraseña nueva</Label>
+              <Input
+                type="password"
+                value={newPasswordInput}
+                onChange={(e) => {
+                  setNewPasswordInput(e.target.value);
+                  setChangePasswordError('');
+                }}
+                placeholder="Nueva contraseña"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Confirmar contraseña nueva</Label>
+              <Input
+                type="password"
+                value={confirmPasswordInput}
+                onChange={(e) => {
+                  setConfirmPasswordInput(e.target.value);
+                  setChangePasswordError('');
+                }}
+                placeholder="Repetí la nueva contraseña"
+              />
+            </div>
+            {changePasswordError && <p className="text-sm text-red-600">{changePasswordError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangePasswordOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={handleChangePassword}
+              disabled={savingPassword}
+              className="bg-green-700 hover:bg-green-800"
+            >
+              {savingPassword ? 'Guardando...' : 'Cambiar contraseña'}
             </Button>
           </DialogFooter>
         </DialogContent>

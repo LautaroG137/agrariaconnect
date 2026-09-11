@@ -19,6 +19,7 @@ type EnvironmentRow = {
   icon: string;
   color: string;
   parent_id: string | null;
+  password: string | null;
 };
 
 type EnvironmentDetailsRow = {
@@ -104,6 +105,7 @@ function mapEnvironment(row: EnvironmentRow): FormativeEnvironment {
     icon: row.icon,
     color: row.color,
     parentId: row.parent_id ?? undefined,
+    password: row.password || '1111',
   };
 }
 
@@ -499,6 +501,7 @@ export async function insertEnvironment(
       icon: env.icon,
       color: env.color,
       parent_id: env.parentId ?? null,
+      password: env.password || '1111',
     })
     .select('*')
     .single();
@@ -519,6 +522,7 @@ export async function patchEnvironment(
   if (updates.icon !== undefined) payload.icon = updates.icon;
   if (updates.color !== undefined) payload.color = updates.color;
   if (updates.parentId !== undefined) payload.parent_id = updates.parentId ?? null;
+  if (updates.password !== undefined) payload.password = updates.password;
 
   const { data, error } = await client
     .from('environments')

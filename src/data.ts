@@ -1,5 +1,7 @@
 import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentInfo } from './types';
 
+export const DEFAULT_ENV_PASSWORD = '1111';
+
 export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
   {
     id: '1',
@@ -8,6 +10,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'animal',
     icon: 'Bird',
     color: 'bg-orange-100 text-orange-700 border-orange-200',
+    password: DEFAULT_ENV_PASSWORD,
   },
   {
     id: '1-1',
@@ -17,6 +20,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'animal',
     icon: 'Bird',
     color: 'bg-orange-50 text-orange-600 border-orange-100',
+    password: DEFAULT_ENV_PASSWORD,
   },
   {
     id: '1-2',
@@ -26,6 +30,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'animal',
     icon: 'Bird',
     color: 'bg-orange-50 text-orange-600 border-orange-100',
+    password: DEFAULT_ENV_PASSWORD,
   },
   {
     id: '2',
@@ -34,6 +39,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'vegetal',
     icon: 'Leaf',
     color: 'bg-green-100 text-green-700 border-green-200',
+    password: DEFAULT_ENV_PASSWORD,
   },
   {
     id: '2-1',
@@ -43,6 +49,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'vegetal',
     icon: 'Leaf',
     color: 'bg-green-50 text-green-600 border-green-100',
+    password: DEFAULT_ENV_PASSWORD,
   },
   {
     id: '3',
@@ -51,6 +58,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'animal',
     icon: 'Milk',
     color: 'bg-blue-100 text-blue-700 border-blue-200',
+    password: DEFAULT_ENV_PASSWORD,
   },
   {
     id: '4',
@@ -59,6 +67,7 @@ export const MOCK_ENVIRONMENTS: FormativeEnvironment[] = [
     type: 'maquinaria',
     icon: 'Settings',
     color: 'bg-slate-100 text-slate-700 border-slate-200',
+    password: DEFAULT_ENV_PASSWORD,
   },
 ];
 

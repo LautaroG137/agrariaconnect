@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { 
   Sprout, 
   FileSpreadsheet, 
@@ -154,24 +154,6 @@ const Navbar = () => (
   </nav>
 );
 
-const unlockedEnvKey = (id: string) => `env-unlocked:${id}`;
-
-const isEnvironmentUnlocked = (id: string) => {
-  try {
-    return sessionStorage.getItem(unlockedEnvKey(id)) === '1';
-  } catch {
-    return false;
-  }
-};
-
-const unlockEnvironment = (id: string) => {
-  try {
-    sessionStorage.setItem(unlockedEnvKey(id), '1');
-  } catch {
-    // ignore
-  }
-};
-
 const PasswordPromptDialog = ({
   open,
   onOpenChange,
@@ -324,12 +306,12 @@ const EnvironmentCard = ({
           </CardContent>
           <CardFooter className="flex justify-between text-xs text-muted-foreground border-t pt-4">
             <div className="flex items-center gap-1">
-              <Lock className="h-3 w-3" />
-              <span>Protegido</span>
+              <MessageSquare className="h-3 w-3" />
+              <span>Ver entorno</span>
             </div>
             <div className="flex items-center gap-1">
               <FileSpreadsheet className="h-3 w-3" />
-              <span>Ver entorno</span>
+              <span>Abrir</span>
             </div>
           </CardFooter>
         </button>
@@ -788,7 +770,7 @@ const Dashboard = () => {
   const [deleteEnv, setDeleteEnv] = useState<FormativeEnvironment | null>(null);
   const [passwordAuth, setPasswordAuth] = useState<{
     env: FormativeEnvironment;
-    action: 'enter' | 'edit' | 'delete';
+    action: 'edit' | 'delete';
   } | null>(null);
 
   const handleCreateEnvironment = async () => {
@@ -815,11 +797,7 @@ const Dashboard = () => {
   };
 
   const requestOpenEnvironment = (env: FormativeEnvironment) => {
-    if (isEnvironmentUnlocked(env.id)) {
-      navigate(`/entorno/${env.id}`);
-      return;
-    }
-    setPasswordAuth({ env, action: 'enter' });
+    navigate(`/entorno/${env.id}`);
   };
 
   const requestEditEnvironment = (env: FormativeEnvironment) => {
@@ -842,11 +820,6 @@ const Dashboard = () => {
     if (!passwordAuth) return;
     const { env, action } = passwordAuth;
     setPasswordAuth(null);
-    if (action === 'enter') {
-      unlockEnvironment(env.id);
-      navigate(`/entorno/${env.id}`);
-      return;
-    }
     if (action === 'edit') {
       openEditEnvironment(env);
       return;
@@ -1184,26 +1157,14 @@ const Dashboard = () => {
         open={!!passwordAuth}
         onOpenChange={(open) => !open && setPasswordAuth(null)}
         title={
-          passwordAuth?.action === 'enter'
-            ? `Entrar a ${passwordAuth.env.name}`
-            : passwordAuth?.action === 'edit'
-              ? `Editar ${passwordAuth.env.name}`
-              : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
+          passwordAuth?.action === 'edit'
+            ? `Editar ${passwordAuth.env.name}`
+            : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
         }
-        description={
-          passwordAuth?.action === 'enter'
-            ? 'Ingresá la contraseña del entorno para continuar.'
-            : 'Confirmá la contraseña del entorno para realizar esta acción.'
-        }
+        description="Confirmá la contraseña del entorno para realizar esta acción."
         expectedPassword={passwordAuth?.env.password || DEFAULT_ENV_PASSWORD}
         onSuccess={handlePasswordSuccess}
-        confirmLabel={
-          passwordAuth?.action === 'enter'
-            ? 'Entrar'
-            : passwordAuth?.action === 'edit'
-              ? 'Continuar'
-              : 'Confirmar'
-        }
+        confirmLabel="Continuar"
       />
     </div>
   );
@@ -1299,12 +1260,9 @@ const EnvironmentPage = () => {
   const [savingEvent, setSavingEvent] = useState(false);
   const [deleteEventTarget, setDeleteEventTarget] = useState<EnvironmentEvent | null>(null);
 
-  const [accessGranted, setAccessGranted] = useState(false);
-  const [gatePassword, setGatePassword] = useState('');
-  const [gateError, setGateError] = useState('');
   const [passwordAuth, setPasswordAuth] = useState<{
     env: FormativeEnvironment;
-    action: 'edit' | 'delete' | 'enter-sub';
+    action: 'edit' | 'delete';
   } | null>(null);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
@@ -1313,27 +1271,8 @@ const EnvironmentPage = () => {
   const [changePasswordError, setChangePasswordError] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
 
-  useEffect(() => {
-    if (id) {
-      setAccessGranted(isEnvironmentUnlocked(id));
-      setGatePassword('');
-      setGateError('');
-    }
-  }, [id]);
-
   if (loading) return <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">Cargando entorno...</div>;
   if (!env) return <div>Entorno no encontrado</div>;
-
-  const handleGateUnlock = () => {
-    if (gatePassword !== (env.password || DEFAULT_ENV_PASSWORD)) {
-      setGateError('Contraseña incorrecta');
-      return;
-    }
-    unlockEnvironment(env.id);
-    setAccessGranted(true);
-    setGatePassword('');
-    setGateError('');
-  };
 
   const requestEditEnv = (target: FormativeEnvironment = env) => {
     setPasswordAuth({ env: target, action: 'edit' });
@@ -1344,11 +1283,7 @@ const EnvironmentPage = () => {
   };
 
   const requestOpenSubEnv = (sub: FormativeEnvironment) => {
-    if (isEnvironmentUnlocked(sub.id)) {
-      navigate(`/entorno/${sub.id}`);
-      return;
-    }
-    setPasswordAuth({ env: sub, action: 'enter-sub' });
+    navigate(`/entorno/${sub.id}`);
   };
 
   const openEditEnvDialog = (target: FormativeEnvironment = env) => {
@@ -1364,11 +1299,6 @@ const EnvironmentPage = () => {
     if (!passwordAuth) return;
     const { env: target, action } = passwordAuth;
     setPasswordAuth(null);
-    if (action === 'enter-sub') {
-      unlockEnvironment(target.id);
-      navigate(`/entorno/${target.id}`);
-      return;
-    }
     if (action === 'edit') {
       openEditEnvDialog(target);
       return;
@@ -1595,52 +1525,6 @@ const EnvironmentPage = () => {
     setNewSubEnvName('');
     setNewSubEnvDesc('');
   };
-
-  if (!accessGranted) {
-    return (
-      <div className="container mx-auto px-4 py-16 max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Lock className="h-5 w-5 text-green-700" />
-              Acceso a {env.name}
-            </CardTitle>
-            <CardDescription>
-              Este entorno está protegido. Ingresá la contraseña para continuar.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2">
-              <Label htmlFor="gate-password">Contraseña</Label>
-              <Input
-                id="gate-password"
-                type="password"
-                value={gatePassword}
-                onChange={(e) => {
-                  setGatePassword(e.target.value);
-                  setGateError('');
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleGateUnlock();
-                }}
-                placeholder="Ingresá la contraseña"
-                autoFocus
-              />
-              {gateError && <p className="text-sm text-red-600">{gateError}</p>}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => navigate(env.parentId ? `/entorno/${env.parentId}` : '/')}>
-                Volver
-              </Button>
-              <Button className="flex-1 bg-green-700 hover:bg-green-800" onClick={handleGateUnlock}>
-                Entrar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -2383,16 +2267,14 @@ const EnvironmentPage = () => {
         open={!!passwordAuth}
         onOpenChange={(open) => !open && setPasswordAuth(null)}
         title={
-          passwordAuth?.action === 'enter-sub'
-            ? `Entrar a ${passwordAuth.env.name}`
-            : passwordAuth?.action === 'edit'
-              ? `Editar ${passwordAuth.env.name}`
-              : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
+          passwordAuth?.action === 'edit'
+            ? `Editar ${passwordAuth.env.name}`
+            : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
         }
         description="Confirmá la contraseña del entorno para continuar."
         expectedPassword={passwordAuth?.env.password || DEFAULT_ENV_PASSWORD}
         onSuccess={handlePasswordAuthSuccess}
-        confirmLabel={passwordAuth?.action === 'enter-sub' ? 'Entrar' : 'Continuar'}
+        confirmLabel="Continuar"
       />
 
       <Dialog

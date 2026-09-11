@@ -2199,13 +2199,51 @@ const PlanillasPage = () => {
   );
 };
 
+const SplashScreen = ({ onEnter }: { onEnter: () => void }) => (
+  <motion.button
+    type="button"
+    key="splash"
+    onClick={onEnter}
+    className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white cursor-pointer border-0 p-4 sm:p-8"
+    initial={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={{ duration: 0.45 }}
+    aria-label="Entrar a AgrariaConnect"
+  >
+    <motion.img
+      src="/splash.jpg"
+      alt="Agraria Connect - Datos que conectan, decisiones que suman"
+      className="max-h-[85vh] max-w-full w-auto object-contain select-none pointer-events-none"
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
+      draggable={false}
+    />
+    <motion.p
+      className="mt-6 text-sm text-green-800/70 tracking-wide"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: 0.4, duration: 0.5 }}
+    >
+      Tocá la pantalla para continuar
+    </motion.p>
+  </motion.button>
+);
+
 // --- Main App ---
 
 export default function App() {
   const { error, refresh } = useApp();
+  const [showSplash, setShowSplash] = useState(true);
 
   return (
     <Router>
+      <AnimatePresence>
+        {showSplash && (
+          <SplashScreen key="splash-screen" onEnter={() => setShowSplash(false)} />
+        )}
+      </AnimatePresence>
+
       <div className="min-h-screen bg-slate-50/50 font-sans antialiased">
         {error && (
           <div className="bg-red-50 border-b border-red-200 px-4 py-3 text-sm text-red-800 flex items-center justify-between gap-4">

@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { 
   Sprout, 
   FileSpreadsheet, 
@@ -153,6 +153,24 @@ const Navbar = () => (
     </div>
   </nav>
 );
+
+const writeUnlockedKey = (id: string) => `env-write-unlocked:${id}`;
+
+const isWriteUnlocked = (id: string) => {
+  try {
+    return sessionStorage.getItem(writeUnlockedKey(id)) === '1';
+  } catch {
+    return false;
+  }
+};
+
+const unlockWrites = (id: string) => {
+  try {
+    sessionStorage.setItem(writeUnlockedKey(id), '1');
+  } catch {
+    // ignore
+  }
+};
 
 const PasswordPromptDialog = ({
   open,
@@ -1260,10 +1278,8 @@ const EnvironmentPage = () => {
   const [savingEvent, setSavingEvent] = useState(false);
   const [deleteEventTarget, setDeleteEventTarget] = useState<EnvironmentEvent | null>(null);
 
-  const [passwordAuth, setPasswordAuth] = useState<{
-    env: FormativeEnvironment;
-    action: 'edit' | 'delete';
-  } | null>(null);
+  const [writePasswordOpen, setWritePasswordOpen] = useState(false);
+  const writeAccessResolvers = useRef<Array<(ok: boolean) => void>>([]);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
@@ -1274,12 +1290,51 @@ const EnvironmentPage = () => {
   if (loading) return <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">Cargando entorno...</div>;
   if (!env) return <div>Entorno no encontrado</div>;
 
+  const settleWriteAccess = (ok: boolean) => {
+    const resolvers = writeAccessResolvers.current;
+    writeAccessResolvers.current = [];
+    resolvers.forEach((resolve) => resolve(ok));
+  };
+
+  const ensureWriteAccess = (): Promise<boolean> => {
+    if (isWriteUnlocked(env.id)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      writeAccessResolvers.current.push(resolve);
+      setWritePasswordOpen(true);
+    });
+  };
+
+  const handleWritePasswordSuccess = () => {
+    unlockWrites(env.id);
+    setWritePasswordOpen(false);
+    settleWriteAccess(true);
+  };
+
+  const handleWritePasswordCancel = (open: boolean) => {
+    if (!open) {
+      setWritePasswordOpen(false);
+      settleWriteAccess(false);
+    }
+  };
+
+  const withWriteAccess = async (action: () => void | Promise<void>) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await action();
+  };
+
   const requestEditEnv = (target: FormativeEnvironment = env) => {
-    setPasswordAuth({ env: target, action: 'edit' });
+    void withWriteAccess(() => openEditEnvDialog(target));
   };
 
   const requestDeleteEnv = (target: FormativeEnvironment = env) => {
-    setPasswordAuth({ env: target, action: 'delete' });
+    void withWriteAccess(async () => {
+      if (target.id === id) {
+        setDeleteEnvOpen(true);
+      } else {
+        await removeEnvironment(target.id);
+      }
+    });
   };
 
   const requestOpenSubEnv = (sub: FormativeEnvironment) => {
@@ -1293,23 +1348,6 @@ const EnvironmentPage = () => {
     setEditEnvType(target.type);
     setEditEnvIcon(isEnvironmentIconKey(target.icon) ? target.icon : DEFAULT_ENV_ICON);
     setEditEnvOpen(true);
-  };
-
-  const handlePasswordAuthSuccess = () => {
-    if (!passwordAuth) return;
-    const { env: target, action } = passwordAuth;
-    setPasswordAuth(null);
-    if (action === 'edit') {
-      openEditEnvDialog(target);
-      return;
-    }
-    if (action === 'delete') {
-      if (target.id === id) {
-        setDeleteEnvOpen(true);
-      } else {
-        removeEnvironment(target.id);
-      }
-    }
   };
 
   const handleChangePassword = async () => {
@@ -1368,19 +1406,23 @@ const EnvironmentPage = () => {
   };
 
   const openCreateEvent = () => {
-    setEditingEvent(null);
-    setEventTitle('');
-    setEventDate(new Date().toISOString().split('T')[0]);
-    setEventTime('09:00');
-    setEventDialogOpen(true);
+    void withWriteAccess(() => {
+      setEditingEvent(null);
+      setEventTitle('');
+      setEventDate(new Date().toISOString().split('T')[0]);
+      setEventTime('09:00');
+      setEventDialogOpen(true);
+    });
   };
 
   const openEditEvent = (event: EnvironmentEvent) => {
-    setEditingEvent(event);
-    setEventTitle(event.title);
-    setEventDate(toLocalDateInput(event.eventAt));
-    setEventTime(toLocalTimeInput(event.eventAt));
-    setEventDialogOpen(true);
+    void withWriteAccess(() => {
+      setEditingEvent(event);
+      setEventTitle(event.title);
+      setEventDate(toLocalDateInput(event.eventAt));
+      setEventTime(toLocalTimeInput(event.eventAt));
+      setEventDialogOpen(true);
+    });
   };
 
   const handleSaveEvent = async () => {
@@ -1418,8 +1460,14 @@ const EnvironmentPage = () => {
     }
   };
 
+  const requestDeleteEvent = (event: EnvironmentEvent) => {
+    void withWriteAccess(() => setDeleteEventTarget(event));
+  };
+
   const handleAddActivityManual = async () => {
     if (!newActivityTitle.trim() || !newActivityContent.trim()) return;
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     await addActivity({
       environmentId: id!,
       environmentName: env.name,
@@ -1433,6 +1481,8 @@ const EnvironmentPage = () => {
   };
 
   const handleAddActivity = async (title: string, content: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     await addActivity({
       environmentId: id!,
       environmentName: env.name,
@@ -1444,6 +1494,8 @@ const EnvironmentPage = () => {
 
   const handleAddTask = async () => {
     if (!newTaskTitle.trim()) return;
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     setSavingTask(true);
     try {
       await addTask({
@@ -1463,6 +1515,8 @@ const EnvironmentPage = () => {
 
   const handleCreateSheet = async () => {
     if (!newSheetTitle || !newSheetCols) return;
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     const cols = ['Fila', ...newSheetCols.split(',').map(c => c.trim())];
     const rowNames = newSheetRows.split(',').map(r => r.trim()).filter(r => r !== '');
     
@@ -1490,6 +1544,8 @@ const EnvironmentPage = () => {
   };
 
   const updateCell = async (sheetId: string, rowIndex: number, column: string, value: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     const sheet = envSpreadsheets.find((s) => s.id === sheetId);
     if (!sheet) return;
     const newRows = [...sheet.rows];
@@ -1498,6 +1554,8 @@ const EnvironmentPage = () => {
   };
 
   const addRowToSheet = async (sheetId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     const sheet = envSpreadsheets.find((s) => s.id === sheetId);
     if (!sheet) return;
     const newRow: Record<string, any> = { Fila: `Nueva Fila ${sheet.rows.length + 1}` };
@@ -1507,6 +1565,8 @@ const EnvironmentPage = () => {
 
   const handleCreateSubEnv = async () => {
     if (!newSubEnvName) return;
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
     await addEnvironment({
       parentId: id,
       name: newSubEnvName,
@@ -1524,6 +1584,80 @@ const EnvironmentPage = () => {
 
     setNewSubEnvName('');
     setNewSubEnvDesc('');
+  };
+
+  const guardedUpdateActivity = async (
+    activityId: string,
+    updates: Pick<Activity, 'title' | 'content' | 'author'>
+  ) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await updateActivity(activityId, updates);
+  };
+
+  const guardedDeleteActivity = async (activityId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await removeActivity(activityId);
+  };
+
+  const guardedCompleteActivity = async (
+    activityId: string,
+    completedBy: string,
+    durationMinutes: number
+  ) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await completeActivity(activityId, completedBy, durationMinutes);
+  };
+
+  const guardedUncompleteActivity = async (activityId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await uncompleteActivity(activityId);
+  };
+
+  const guardedCompleteTask = async (
+    taskId: string,
+    completedBy: string,
+    durationMinutes: number
+  ) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await completeTask(taskId, completedBy, durationMinutes);
+  };
+
+  const guardedUncompleteTask = async (taskId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await uncompleteTask(taskId);
+  };
+
+  const guardedUpdateInfo = async (updates: Parameters<typeof updateEnvironmentInfo>[1]) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await updateEnvironmentInfo(id!, updates);
+  };
+
+  const guardedAddInventory = async (item: Parameters<typeof addInventoryItem>[1]) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await addInventoryItem(id!, item);
+  };
+
+  const guardedUpdateInventory = async (
+    itemId: string,
+    updates: Parameters<typeof updateInventoryItem>[2]
+  ) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await updateInventoryItem(id!, itemId, updates);
+  };
+
+  const guardedRemoveInventory = async (itemId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await removeInventoryItem(id!, itemId);
   };
 
   return (
@@ -1631,10 +1765,10 @@ const EnvironmentPage = () => {
                   <ActivityItem
                     key={a.id}
                     activity={a}
-                    onUpdate={updateActivity}
-                    onDelete={removeActivity}
-                    onComplete={completeActivity}
-                    onUncomplete={uncompleteActivity}
+                    onUpdate={guardedUpdateActivity}
+                    onDelete={guardedDeleteActivity}
+                    onComplete={guardedCompleteActivity}
+                    onUncomplete={guardedUncompleteActivity}
                   />
                 ))}
                 {localActivities.length === 0 && (
@@ -1770,8 +1904,8 @@ const EnvironmentPage = () => {
                       <TaskItem
                         key={t.id}
                         task={t}
-                        onComplete={completeTask}
-                        onUncomplete={uncompleteTask}
+                        onComplete={guardedCompleteTask}
+                        onUncomplete={guardedUncompleteTask}
                       />
                     ))
                   ) : (
@@ -1904,7 +2038,7 @@ const EnvironmentPage = () => {
                       <Label>Responsable</Label>
                       <Input
                         value={info.responsible}
-                        onChange={(e) => updateEnvironmentInfo(id!, { responsible: e.target.value })}
+                        onChange={(e) => guardedUpdateInfo({ responsible: e.target.value })}
                         placeholder="Nombre del responsable"
                       />
                     </div>
@@ -1912,7 +2046,7 @@ const EnvironmentPage = () => {
                       <Label>Ubicación</Label>
                       <Input
                         value={info.location}
-                        onChange={(e) => updateEnvironmentInfo(id!, { location: e.target.value })}
+                        onChange={(e) => guardedUpdateInfo({ location: e.target.value })}
                         placeholder="Ubicación del entorno"
                       />
                     </div>
@@ -1920,7 +2054,7 @@ const EnvironmentPage = () => {
                       <Label>Horario de actividad</Label>
                       <Input
                         value={info.schedule}
-                        onChange={(e) => updateEnvironmentInfo(id!, { schedule: e.target.value })}
+                        onChange={(e) => guardedUpdateInfo({ schedule: e.target.value })}
                         placeholder="Ej: Lunes a Viernes 08:00 - 12:00"
                       />
                     </div>
@@ -1928,7 +2062,7 @@ const EnvironmentPage = () => {
                       <Label>Estado</Label>
                       <Select
                         value={info.status}
-                        onValueChange={(v) => updateEnvironmentInfo(id!, { status: v })}
+                        onValueChange={(v) => guardedUpdateInfo({ status: v })}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -1998,7 +2132,7 @@ const EnvironmentPage = () => {
                             <Button
                               onClick={() => {
                                 if (!newInvName.trim() || !newInvQuantity.trim()) return;
-                                addInventoryItem(id!, {
+                                guardedAddInventory({
                                   name: newInvName.trim(),
                                   quantity: newInvQuantity.trim(),
                                   unit: newInvUnit.trim() || 'unidades',
@@ -2038,7 +2172,7 @@ const EnvironmentPage = () => {
                                     className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
                                     value={item.name}
                                     onChange={(e) =>
-                                      updateInventoryItem(id!, item.id, { name: e.target.value })
+                                      guardedUpdateInventory(item.id, { name: e.target.value })
                                     }
                                   />
                                 </TableCell>
@@ -2047,7 +2181,7 @@ const EnvironmentPage = () => {
                                     className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
                                     value={item.quantity}
                                     onChange={(e) =>
-                                      updateInventoryItem(id!, item.id, { quantity: e.target.value })
+                                      guardedUpdateInventory(item.id, { quantity: e.target.value })
                                     }
                                   />
                                 </TableCell>
@@ -2056,7 +2190,7 @@ const EnvironmentPage = () => {
                                     className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
                                     value={item.unit}
                                     onChange={(e) =>
-                                      updateInventoryItem(id!, item.id, { unit: e.target.value })
+                                      guardedUpdateInventory(item.id, { unit: e.target.value })
                                     }
                                   />
                                 </TableCell>
@@ -2065,7 +2199,7 @@ const EnvironmentPage = () => {
                                     className="h-8 border-transparent hover:border-slate-200 focus:border-green-500"
                                     value={item.notes ?? ''}
                                     onChange={(e) =>
-                                      updateInventoryItem(id!, item.id, { notes: e.target.value })
+                                      guardedUpdateInventory(item.id, { notes: e.target.value })
                                     }
                                     placeholder="..."
                                   />
@@ -2075,7 +2209,7 @@ const EnvironmentPage = () => {
                                     variant="ghost"
                                     size="icon"
                                     className="h-8 w-8 text-red-500 hover:text-red-700"
-                                    onClick={() => removeInventoryItem(id!, item.id)}
+                                    onClick={() => guardedRemoveInventory(item.id)}
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
@@ -2123,7 +2257,7 @@ const EnvironmentPage = () => {
                         <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEvent(event)} aria-label="Editar evento">
                           <Pencil className="h-3 w-3" />
                         </Button>
-                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => setDeleteEventTarget(event)} aria-label="Eliminar evento">
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => requestDeleteEvent(event)} aria-label="Eliminar evento">
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -2264,17 +2398,13 @@ const EnvironmentPage = () => {
       </Dialog>
 
       <PasswordPromptDialog
-        open={!!passwordAuth}
-        onOpenChange={(open) => !open && setPasswordAuth(null)}
-        title={
-          passwordAuth?.action === 'edit'
-            ? `Editar ${passwordAuth.env.name}`
-            : `Eliminar ${passwordAuth?.env.name ?? 'entorno'}`
-        }
-        description="Confirmá la contraseña del entorno para continuar."
-        expectedPassword={passwordAuth?.env.password || DEFAULT_ENV_PASSWORD}
-        onSuccess={handlePasswordAuthSuccess}
-        confirmLabel="Continuar"
+        open={writePasswordOpen}
+        onOpenChange={handleWritePasswordCancel}
+        title={`Contraseña de ${env.name}`}
+        description="Ingresá la contraseña del entorno para crear, modificar o eliminar contenido."
+        expectedPassword={env.password || DEFAULT_ENV_PASSWORD}
+        onSuccess={handleWritePasswordSuccess}
+        confirmLabel="Confirmar"
       />
 
       <Dialog

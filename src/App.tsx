@@ -56,6 +56,7 @@ import { DEFAULT_ENVIRONMENT_INFO, DEFAULT_ENV_PASSWORD } from './data';
 import { iconMap, ENV_ICON_OPTIONS, isEnvironmentIconKey, DEFAULT_ENV_ICON } from './icons';
 import { useApp } from './context/AppContext';
 import { downloadSpreadsheet } from './lib/spreadsheetCsv';
+import { columnLetter, displayCell, isFormula } from './lib/spreadsheetFormula';
 import { parseExcelFile } from './lib/spreadsheetImport';
 import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent, EnvironmentLink } from './types';
 
@@ -82,6 +83,42 @@ function normalizeLinkUrl(value: string) {
 function sheetCellKey(sheetId: string, rowIndex: number, column: string) {
   return `${sheetId}\u0000${rowIndex}\u0000${column}`;
 }
+
+const SheetCellInput = ({
+  raw,
+  grid,
+  rowIndex,
+  colIndex,
+  className,
+  onChange,
+  onCommit,
+}: {
+  raw: string;
+  grid: string[][];
+  rowIndex: number;
+  colIndex: number;
+  className?: string;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+}) => {
+  const [focused, setFocused] = useState(false);
+  const formula = isFormula(raw);
+  const shown = focused || !formula ? raw : displayCell(raw, grid, rowIndex, colIndex);
+  return (
+    <Input
+      className={`${className ?? ''} ${!focused && formula ? 'font-medium text-green-800' : ''}`}
+      value={shown}
+      title={formula ? raw : undefined}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={(e) => {
+        setFocused(false);
+        onCommit(e.target.value);
+      }}
+      placeholder="..."
+    />
+  );
+};
 
 function linkHost(url: string) {
   try {
@@ -2378,10 +2415,14 @@ const EnvironmentPage = () => {
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              {s.columns.map(col => (
+                              <TableHead className="w-10 text-center text-[10px] text-muted-foreground">#</TableHead>
+                              {s.columns.map((col, colIndex) => (
                                 <TableHead key={col} className={col === 'Fila' ? 'bg-slate-50 font-bold w-40' : 'min-w-36'}>
                                   <div className="flex items-center justify-between gap-2">
-                                    <span>{col}</span>
+                                    <span>
+                                      <span className="block text-[10px] font-normal text-muted-foreground">{columnLetter(colIndex)}</span>
+                                      {col}
+                                    </span>
                                     {s.columns.length > 1 && (
                                       <button
                                         type="button"
@@ -2399,20 +2440,31 @@ const EnvironmentPage = () => {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {s.rows.map((row, rowIndex) => (
+                            {s.rows.map((row, rowIndex) => {
+                              const grid = s.rows.map((sheetRow, gridRowIndex) =>
+                                s.columns.map((column) => {
+                                  const key = sheetCellKey(s.id, gridRowIndex, column);
+                                  return key in cellDrafts ? cellDrafts[key] : String(sheetRow[column] ?? '');
+                                })
+                              );
+                              return (
                               <TableRow key={rowIndex}>
-                                {s.columns.map(col => {
+                                <TableCell className="w-10 text-center text-xs text-muted-foreground">{rowIndex + 1}</TableCell>
+                                {s.columns.map((col, colIndex) => {
                                   const draftKey = sheetCellKey(s.id, rowIndex, col);
+                                  const raw = draftKey in cellDrafts ? cellDrafts[draftKey] : String(row[col] ?? '');
                                   return (
                                     <TableCell key={col} className={col === 'Fila' ? 'bg-slate-50 p-1' : 'p-1'}>
-                                      <Input
+                                      <SheetCellInput
+                                        raw={raw}
+                                        grid={grid}
+                                        rowIndex={rowIndex}
+                                        colIndex={colIndex}
                                         className="h-8 border-transparent hover:border-slate-200 focus:border-green-500 bg-transparent"
-                                        value={draftKey in cellDrafts ? cellDrafts[draftKey] : String(row[col] ?? '')}
-                                        onChange={(e) =>
-                                          setCellDrafts((prev) => ({ ...prev, [draftKey]: e.target.value }))
+                                        onChange={(value) =>
+                                          setCellDrafts((prev) => ({ ...prev, [draftKey]: value }))
                                         }
-                                        onBlur={(e) => commitCell(s.id, rowIndex, col, e.target.value)}
-                                        placeholder="..."
+                                        onCommit={(value) => commitCell(s.id, rowIndex, col, value)}
                                       />
                                     </TableCell>
                                   );
@@ -2430,10 +2482,11 @@ const EnvironmentPage = () => {
                                   </Button>
                                 </TableCell>
                               </TableRow>
-                            ))}
+                              );
+                            })}
                             {s.rows.length === 0 && (
                               <TableRow>
-                                <TableCell colSpan={s.columns.length + 1} className="text-center py-4 text-muted-foreground">
+                                <TableCell colSpan={s.columns.length + 2} className="text-center py-4 text-muted-foreground">
                                   Planilla vacía. Añadí una fila para comenzar.
                                 </TableCell>
                               </TableRow>
@@ -2442,7 +2495,10 @@ const EnvironmentPage = () => {
                         </Table>
                       </div>
                     </CardContent>
-                    <CardFooter className="flex justify-end gap-2">
+                    <CardFooter className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                      <p className="text-xs text-muted-foreground">
+                        Fórmulas: =SUMA(A1:A5), =PROMEDIO(A1:A5), =RESTA(A1;A2) o =A1-A2. La letra es la columna y el número la fila.
+                      </p>
                       <Button variant="outline" size="sm" onClick={() => exportSheet(s)}>
                         <Download className="h-3.5 w-3.5 mr-1" /> Exportar CSV
                       </Button>

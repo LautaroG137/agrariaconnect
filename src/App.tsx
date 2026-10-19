@@ -15,7 +15,9 @@ import {
   Package,
   Pencil,
   Lock,
-  KeyRound
+  KeyRound,
+  ExternalLink,
+  Link2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -50,7 +52,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_ENVIRONMENT_INFO, DEFAULT_ENV_PASSWORD } from './data';
 import { iconMap, ENV_ICON_OPTIONS, isEnvironmentIconKey, DEFAULT_ENV_ICON } from './icons';
 import { useApp } from './context/AppContext';
-import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent } from './types';
+import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent, EnvironmentLink } from './types';
 
 const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> = {
   animal: { icon: 'Bird', color: 'bg-orange-100 text-orange-700 border-orange-200' },
@@ -58,6 +60,27 @@ const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> 
   maquinaria: { icon: 'Tractor', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   otro: { icon: 'HelpCircle', color: 'bg-purple-100 text-purple-700 border-purple-200' },
 };
+
+function normalizeLinkUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const withProtocol = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+function linkHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
 
 const ENV_TYPE_DEFAULT_ICON: Record<EnvironmentType, string> = {
   animal: 'Bird',
@@ -199,8 +222,8 @@ const PasswordPromptDialog = ({
     }
     setPassword('');
     setError('');
-    onOpenChange(false);
     onSuccess();
+    onOpenChange(false);
   };
 
   return (
@@ -1158,7 +1181,7 @@ const Dashboard = () => {
           <DialogHeader>
             <DialogTitle>Eliminar entorno</DialogTitle>
             <DialogDescription>
-              ¿Eliminar &quot;{deleteEnv?.name}&quot; y todo su contenido (tareas, actividades, planillas, sub-entornos)?
+              ¿Eliminar &quot;{deleteEnv?.name}&quot; y todo su contenido (tareas, actividades, planillas, links, sub-entornos)?
               Esta acción no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
@@ -1215,6 +1238,10 @@ const EnvironmentPage = () => {
     removeEnvironment,
     addSpreadsheet,
     updateSpreadsheet,
+    links,
+    addEnvironmentLink,
+    updateEnvironmentLink,
+    removeEnvironmentLink,
     events,
     addEnvironmentEvent,
     updateEnvironmentEvent,
@@ -1233,6 +1260,7 @@ const EnvironmentPage = () => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   const envSpreadsheets = spreadsheets.filter((s) => s.environmentId === id);
+  const envLinks = links.filter((link) => link.environmentId === id);
   const envEvents = events
     .filter((e) => e.environmentId === id && !isPast(new Date(e.eventAt)))
     .sort((a, b) => new Date(a.eventAt).getTime() - new Date(b.eventAt).getTime());
@@ -1252,6 +1280,14 @@ const EnvironmentPage = () => {
   const [newSheetTitle, setNewSheetTitle] = useState('');
   const [newSheetCols, setNewSheetCols] = useState('');
   const [newSheetRows, setNewSheetRows] = useState('');
+
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
+  const [linkTitle, setLinkTitle] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkNotes, setLinkNotes] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const [savingLink, setSavingLink] = useState(false);
 
   const [newSubEnvName, setNewSubEnvName] = useState('');
   const [newSubEnvDesc, setNewSubEnvDesc] = useState('');
@@ -1660,6 +1696,67 @@ const EnvironmentPage = () => {
     await removeInventoryItem(id!, itemId);
   };
 
+  const resetLinkForm = () => {
+    setEditingLinkId(null);
+    setLinkTitle('');
+    setLinkUrl('');
+    setLinkNotes('');
+    setLinkError('');
+  };
+
+  const openNewLinkDialog = () => {
+    resetLinkForm();
+    setLinkDialogOpen(true);
+  };
+
+  const openEditLinkDialog = (link: EnvironmentLink) => {
+    setEditingLinkId(link.id);
+    setLinkTitle(link.title);
+    setLinkUrl(link.url);
+    setLinkNotes(link.notes ?? '');
+    setLinkError('');
+    setLinkDialogOpen(true);
+  };
+
+  const handleSaveLink = async () => {
+    const title = linkTitle.trim();
+    const url = normalizeLinkUrl(linkUrl);
+    if (!title) {
+      setLinkError('Ingresá un nombre para el link');
+      return;
+    }
+    if (!url) {
+      setLinkError('Ingresá un link válido, por ejemplo un Drive');
+      return;
+    }
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    setSavingLink(true);
+    try {
+      const notes = linkNotes.trim();
+      if (editingLinkId) {
+        await updateEnvironmentLink(editingLinkId, { title, url, notes });
+      } else {
+        await addEnvironmentLink({
+          environmentId: id!,
+          title,
+          url,
+          notes,
+        });
+      }
+      setLinkDialogOpen(false);
+      resetLinkForm();
+    } finally {
+      setSavingLink(false);
+    }
+  };
+
+  const handleDeleteLink = async (linkId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await removeEnvironmentLink(linkId);
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center gap-4 mb-6">
@@ -1704,12 +1801,13 @@ const EnvironmentPage = () => {
           </div>
 
           <Tabs defaultValue="actividades" className="w-full">
-            <TabsList className={`grid w-full mb-8 ${!env.parentId ? 'grid-cols-5' : 'grid-cols-4'}`}>
-              <TabsTrigger value="actividades">Actividades</TabsTrigger>
-              {!env.parentId && <TabsTrigger value="subentornos">Sub-entornos</TabsTrigger>}
-              <TabsTrigger value="tareas">Tareas Diarias</TabsTrigger>
-              <TabsTrigger value="planillas">Planillas</TabsTrigger>
-              <TabsTrigger value="info">Información</TabsTrigger>
+            <TabsList className="mb-8 flex h-auto w-full flex-wrap justify-start gap-1">
+              <TabsTrigger value="actividades" className="flex-none px-3">Actividades</TabsTrigger>
+              {!env.parentId && <TabsTrigger value="subentornos" className="flex-none px-3">Sub-entornos</TabsTrigger>}
+              <TabsTrigger value="tareas" className="flex-none px-3">Tareas Diarias</TabsTrigger>
+              <TabsTrigger value="planillas" className="flex-none px-3">Planillas</TabsTrigger>
+              <TabsTrigger value="links" className="flex-none px-3">Links</TabsTrigger>
+              <TabsTrigger value="info" className="flex-none px-3">Información</TabsTrigger>
             </TabsList>
             
             <TabsContent value="actividades">
@@ -2024,6 +2122,131 @@ const EnvironmentPage = () => {
                   </Card>
                 ))}
               </div>
+            </TabsContent>
+
+            <TabsContent value="links">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-semibold">Links del entorno</h3>
+                  <p className="text-sm text-muted-foreground">Drives, carpetas y otros accesos de este entorno.</p>
+                </div>
+                <Button className="bg-green-700 hover:bg-green-800" onClick={openNewLinkDialog}>
+                  <Plus className="mr-2 h-4 w-4" /> Nuevo link
+                </Button>
+              </div>
+
+              {envLinks.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {envLinks.map((link) => (
+                    <Card key={link.id}>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div className="p-2 rounded-lg bg-green-50 text-green-700">
+                              <Link2 className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <CardTitle className="text-base">{link.title}</CardTitle>
+                              <CardDescription className="truncate">{linkHost(link.url)}</CardDescription>
+                            </div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Editar ${link.title}`}
+                              onClick={() => openEditLinkDialog(link)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Eliminar ${link.title}`}
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => handleDeleteLink(link.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {link.notes && <p className="text-sm text-muted-foreground">{link.notes}</p>}
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-sm font-medium text-green-700 hover:text-green-800 break-all"
+                        >
+                          Abrir link
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        </a>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground italic border rounded-xl">
+                  Todavía no hay links en este entorno.
+                </div>
+              )}
+
+              <Dialog
+                open={linkDialogOpen}
+                onOpenChange={(open) => {
+                  setLinkDialogOpen(open);
+                  if (!open) resetLinkForm();
+                }}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>{editingLinkId ? 'Editar link' : 'Nuevo link'}</DialogTitle>
+                    <DialogDescription>
+                      Pegá el acceso a un Drive, una carpeta o cualquier página que haga falta en este entorno.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <Label>Nombre</Label>
+                      <Input
+                        value={linkTitle}
+                        onChange={(e) => setLinkTitle(e.target.value)}
+                        placeholder="Ej: Drive de registros"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Link</Label>
+                      <Input
+                        value={linkUrl}
+                        onChange={(e) => setLinkUrl(e.target.value)}
+                        placeholder="https://drive.google.com/..."
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Nota (opcional)</Label>
+                      <Textarea
+                        value={linkNotes}
+                        onChange={(e) => setLinkNotes(e.target.value)}
+                        placeholder="Para qué se usa este acceso"
+                      />
+                    </div>
+                    {linkError && <p className="text-sm text-red-600">{linkError}</p>}
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setLinkDialogOpen(false)}>Cancelar</Button>
+                    <Button
+                      onClick={handleSaveLink}
+                      disabled={savingLink}
+                      className="bg-green-700 hover:bg-green-800"
+                    >
+                      {savingLink ? 'Guardando...' : 'Guardar link'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </TabsContent>
 
             <TabsContent value="info">

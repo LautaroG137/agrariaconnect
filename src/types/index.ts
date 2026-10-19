@@ -81,3 +81,12 @@ export interface EnvironmentEvent {
   eventAt: string;
   createdAt: string;
 }
+
+export interface EnvironmentLink {
+  id: string;
+  environmentId: string;
+  title: string;
+  url: string;
+  notes?: string;
+  createdAt: string;
+}

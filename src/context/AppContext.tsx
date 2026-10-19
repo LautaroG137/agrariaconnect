@@ -11,6 +11,7 @@ import {
   Spreadsheet,
   Task,
   EnvironmentEvent,
+  EnvironmentLink,
 } from '../types';
 
 interface AppContextValue {
@@ -22,6 +23,7 @@ interface AppContextValue {
   notices: Notice[];
   events: EnvironmentEvent[];
   spreadsheets: Spreadsheet[];
+  links: EnvironmentLink[];
   environmentInfo: Record<string, EnvironmentInfo>;
   addTask: (task: Omit<Task, 'id' | 'completed'>) => Promise<void>;
   completeTask: (id: string, completedBy: string, durationMinutes: number) => Promise<void>;
@@ -61,6 +63,12 @@ interface AppContextValue {
     id: string,
     updates: Partial<Pick<Spreadsheet, 'title' | 'columns' | 'rows'>>
   ) => Promise<void>;
+  addEnvironmentLink: (link: Omit<EnvironmentLink, 'id' | 'createdAt'>) => Promise<void>;
+  updateEnvironmentLink: (
+    id: string,
+    updates: Partial<Pick<EnvironmentLink, 'title' | 'url' | 'notes'>>
+  ) => Promise<void>;
+  removeEnvironmentLink: (id: string) => Promise<void>;
   getEnvironmentName: (environmentId: string) => string;
   refresh: () => Promise<void>;
 }
@@ -84,6 +92,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [events, setEvents] = useState<EnvironmentEvent[]>([]);
   const [spreadsheets, setSpreadsheets] = useState<Spreadsheet[]>([]);
+  const [links, setLinks] = useState<EnvironmentLink[]>([]);
   const [environmentInfo, setEnvironmentInfo] = useState<Record<string, EnvironmentInfo>>({});
 
   const getEnvironmentName = useCallback(
@@ -109,6 +118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setNotices(data.notices);
       setEvents(data.events);
       setSpreadsheets(data.spreadsheets);
+      setLinks(data.links);
       setEnvironmentInfo(data.environmentInfo);
     } catch (err) {
       setError(getErrorMessage(err));
@@ -344,6 +354,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
     setEvents((prev) => prev.filter((e) => !idsToRemove.has(e.environmentId)));
     setSpreadsheets((prev) => prev.filter((s) => !idsToRemove.has(s.environmentId)));
+    setLinks((prev) => prev.filter((link) => !idsToRemove.has(link.environmentId)));
     setEnvironmentInfo((prev) => {
       const next = { ...prev };
       for (const envId of idsToRemove) delete next[envId];
@@ -364,6 +375,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSpreadsheets((prev) => prev.map((s) => (s.id === id ? updated : s)));
   };
 
+  const addEnvironmentLink = async (link: Omit<EnvironmentLink, 'id' | 'createdAt'>) => {
+    const created = await runMutation(() => api.insertEnvironmentLink(link));
+    setLinks((prev) => [...prev, created]);
+  };
+
+  const updateEnvironmentLink = async (
+    id: string,
+    updates: Partial<Pick<EnvironmentLink, 'title' | 'url' | 'notes'>>
+  ) => {
+    const updated = await runMutation(() => api.patchEnvironmentLink(id, updates));
+    setLinks((prev) => prev.map((link) => (link.id === id ? updated : link)));
+  };
+
+  const removeEnvironmentLink = async (id: string) => {
+    await runMutation(() => api.deleteEnvironmentLink(id));
+    setLinks((prev) => prev.filter((link) => link.id !== id));
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -375,6 +404,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notices,
         events,
         spreadsheets,
+        links,
         environmentInfo,
         addTask,
         completeTask,
@@ -398,6 +428,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeEnvironment,
         addSpreadsheet,
         updateSpreadsheet,
+        addEnvironmentLink,
+        updateEnvironmentLink,
+        removeEnvironmentLink,
         getEnvironmentName,
         refresh,
       }}

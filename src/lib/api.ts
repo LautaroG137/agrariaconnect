@@ -8,6 +8,7 @@ import {
   Spreadsheet,
   Task,
   EnvironmentEvent,
+  EnvironmentLink,
 } from '../types';
 import { DEFAULT_ENVIRONMENT_INFO } from '../data';
 
@@ -80,6 +81,15 @@ type TaskRow = {
   priority: Task['priority'];
   completed_by: string | null;
   duration_minutes: number | null;
+};
+
+type EnvironmentLinkRow = {
+  id: string;
+  environment_id: string;
+  title: string;
+  url: string;
+  notes: string | null;
+  created_at: string;
 };
 
 type SpreadsheetRow = {
@@ -161,6 +171,17 @@ function mapEnvironmentEvent(row: EnvironmentEventRow): EnvironmentEvent {
   };
 }
 
+function mapEnvironmentLink(row: EnvironmentLinkRow): EnvironmentLink {
+  return {
+    id: row.id,
+    environmentId: row.environment_id,
+    title: row.title,
+    url: row.url,
+    notes: row.notes || undefined,
+    createdAt: row.created_at,
+  };
+}
+
 function mapSpreadsheet(row: SpreadsheetRow): Spreadsheet {
   return {
     id: row.id,
@@ -207,7 +228,7 @@ function buildEnvironmentInfoMap(
 export async function loadAppData() {
   const client = getClient();
 
-  const [envRes, detailsRes, inventoryRes, activitiesRes, tasksRes, spreadsheetsRes, noticesRes, eventsRes] =
+  const [envRes, detailsRes, inventoryRes, activitiesRes, tasksRes, spreadsheetsRes, noticesRes, eventsRes, linksRes] =
     await Promise.all([
       client.from('environments').select('*').order('name'),
       client.from('environment_details').select('*'),
@@ -217,6 +238,7 @@ export async function loadAppData() {
       client.from('spreadsheets').select('*').order('created_at', { ascending: false }),
       client.from('notices').select('*').order('created_at', { ascending: false }),
       client.from('environment_events').select('*').order('event_at'),
+      client.from('environment_links').select('*').order('created_at'),
     ]);
 
   if (envRes.error) throw envRes.error;
@@ -227,6 +249,7 @@ export async function loadAppData() {
   if (spreadsheetsRes.error) throw spreadsheetsRes.error;
   if (noticesRes.error) throw noticesRes.error;
   if (eventsRes.error) throw eventsRes.error;
+  if (linksRes.error) throw linksRes.error;
 
   const environments = (envRes.data as EnvironmentRow[]).map(mapEnvironment);
   const envNameById = Object.fromEntries(environments.map((e) => [e.id, e.name]));
@@ -244,6 +267,7 @@ export async function loadAppData() {
     spreadsheets: (spreadsheetsRes.data as SpreadsheetRow[]).map(mapSpreadsheet),
     notices: (noticesRes.data as NoticeRow[]).map(mapNotice),
     events: (eventsRes.data as EnvironmentEventRow[]).map(mapEnvironmentEvent),
+    links: (linksRes.data as EnvironmentLinkRow[]).map(mapEnvironmentLink),
   };
 }
 
@@ -538,6 +562,52 @@ export async function patchEnvironment(
 export async function deleteEnvironment(id: string) {
   const client = getClient();
   const { error } = await client.from('environments').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function insertEnvironmentLink(
+  link: Omit<EnvironmentLink, 'id' | 'createdAt'>
+) {
+  const client = getClient();
+  const { data, error } = await client
+    .from('environment_links')
+    .insert({
+      environment_id: link.environmentId,
+      title: link.title,
+      url: link.url,
+      notes: link.notes ?? '',
+    })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return mapEnvironmentLink(data as EnvironmentLinkRow);
+}
+
+export async function patchEnvironmentLink(
+  id: string,
+  updates: Partial<Pick<EnvironmentLink, 'title' | 'url' | 'notes'>>
+) {
+  const client = getClient();
+  const payload: Record<string, string> = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.url !== undefined) payload.url = updates.url;
+  if (updates.notes !== undefined) payload.notes = updates.notes;
+
+  const { data, error } = await client
+    .from('environment_links')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return mapEnvironmentLink(data as EnvironmentLinkRow);
+}
+
+export async function deleteEnvironmentLink(id: string) {
+  const client = getClient();
+  const { error } = await client.from('environment_links').delete().eq('id', id);
   if (error) throw error;
 }
 

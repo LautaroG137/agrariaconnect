@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useState, useRef } from 'react';
+import { useState, useRef, type ChangeEvent } from 'react';
 import { 
   Sprout, 
   FileSpreadsheet, 
@@ -19,7 +19,8 @@ import {
   KeyRound,
   ExternalLink,
   Link2,
-  Download
+  Download,
+  Upload
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -55,6 +56,7 @@ import { DEFAULT_ENVIRONMENT_INFO, DEFAULT_ENV_PASSWORD } from './data';
 import { iconMap, ENV_ICON_OPTIONS, isEnvironmentIconKey, DEFAULT_ENV_ICON } from './icons';
 import { useApp } from './context/AppContext';
 import { downloadSpreadsheet } from './lib/spreadsheetCsv';
+import { parseExcelFile } from './lib/spreadsheetImport';
 import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent, EnvironmentLink } from './types';
 
 const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> = {
@@ -1363,6 +1365,9 @@ const EnvironmentPage = () => {
   const [newSheetTitle, setNewSheetTitle] = useState('');
   const [newSheetCols, setNewSheetCols] = useState('');
   const [newSheetRows, setNewSheetRows] = useState('');
+  const [importingSheet, setImportingSheet] = useState(false);
+  const [sheetImportError, setSheetImportError] = useState('');
+  const excelInputRef = useRef<HTMLInputElement>(null);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [columnSheetId, setColumnSheetId] = useState<string | null>(null);
   const [newColumnName, setNewColumnName] = useState('');
@@ -1667,6 +1672,35 @@ const EnvironmentPage = () => {
     setNewSheetTitle('');
     setNewSheetCols('');
     setNewSheetRows('');
+  };
+
+  const handleImportExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setSheetImportError('');
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    setImportingSheet(true);
+    try {
+      const imported = await parseExcelFile(file);
+      for (const sheet of imported) {
+        await addSpreadsheet({
+          environmentId: id!,
+          title: sheet.title,
+          columns: sheet.columns,
+          rows: sheet.rows,
+        });
+        await handleAddActivity(
+          `Nueva Planilla: ${sheet.title}`,
+          `Se importó una planilla de Excel con ${sheet.columns.length} columnas y ${sheet.rows.length} filas.`
+        );
+      }
+    } catch (error) {
+      setSheetImportError(error instanceof Error ? error.message : 'No se pudo importar el archivo.');
+    } finally {
+      setImportingSheet(false);
+    }
   };
 
   const clearSheetDrafts = (sheetId: string) => {
@@ -2247,8 +2281,25 @@ const EnvironmentPage = () => {
             </TabsContent>
             
             <TabsContent value="planillas">
-              <div className="flex justify-between items-center mb-6">
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-xl font-semibold">Planillas del Entorno</h3>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={excelInputRef}
+                    type="file"
+                    accept=".xlsx,.xlsm,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="hidden"
+                    onChange={handleImportExcel}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={importingSheet}
+                    onClick={() => excelInputRef.current?.click()}
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    {importingSheet ? 'Importando...' : 'Importar Excel'}
+                  </Button>
                 <Dialog>
                   <DialogTrigger asChild>
                     <Button className="bg-green-700 hover:bg-green-800">
@@ -2291,7 +2342,11 @@ const EnvironmentPage = () => {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
+              {sheetImportError && (
+                <p className="mb-4 text-sm text-red-600">{sheetImportError}</p>
+              )}
               
               <div className="grid grid-cols-1 gap-6">
                 {envSpreadsheets.map(s => (

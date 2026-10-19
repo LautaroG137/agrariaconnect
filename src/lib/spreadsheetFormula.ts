@@ -3,7 +3,8 @@ const CELL_REF = /^([A-Z]+)(\d+)$/i;
 type Token =
   | { type: 'num'; value: number }
   | { type: 'id'; value: string }
-  | { type: 'op'; value: '+' | '-' }
+  | { type: 'op'; value: '+' | '-' | '*' | '/' }
+  | { type: 'pct' }
   | { type: 'lp' }
   | { type: 'rp' }
   | { type: 'sep' }
@@ -83,8 +84,13 @@ function tokenize(input: string) {
       index += 1;
       continue;
     }
-    if (char === '+' || char === '-') {
+    if (char === '+' || char === '-' || char === '*' || char === '/') {
       tokens.push({ type: 'op', value: char });
+      index += 1;
+      continue;
+    }
+    if (char === '%') {
+      tokens.push({ type: 'pct' });
       index += 1;
       continue;
     }
@@ -159,24 +165,50 @@ class Parser {
   }
 
   private parseExpression(): number {
-    let value = this.parseTerm();
-    while (this.peek()?.type === 'op') {
-      const operator = this.eat() as { type: 'op'; value: '+' | '-' };
-      const right = this.parseTerm();
-      value = operator.value === '+' ? value + right : value - right;
+    let value = this.parseProduct();
+    while (this.isOperator('+') || this.isOperator('-')) {
+      const operator = (this.eat() as { type: 'op'; value: '+' | '-' }).value;
+      const right = this.parseProduct();
+      value = operator === '+' ? value + right : value - right;
     }
     return value;
   }
 
-  private parseTerm(): number {
-    if (this.peek()?.type === 'op' && (this.peek() as { value: string }).value === '-') {
-      this.eat();
-      return -this.parseTerm();
+  private parseProduct(): number {
+    let value = this.parseUnary();
+    while (this.isOperator('*') || this.isOperator('/')) {
+      const operator = (this.eat() as { type: 'op'; value: '*' | '/' }).value;
+      const right = this.parseUnary();
+      if (operator === '/' && right === 0) throw new FormulaError('#DIV/0!');
+      value = operator === '*' ? value * right : value / right;
     }
-    if (this.peek()?.type === 'op' && (this.peek() as { value: string }).value === '+') {
+    return value;
+  }
+
+  private parseUnary(): number {
+    if (this.isOperator('-')) {
       this.eat();
+      return -this.parseUnary();
     }
-    return this.parsePrimary();
+    if (this.isOperator('+')) {
+      this.eat();
+      return this.parseUnary();
+    }
+    return this.parsePercent();
+  }
+
+  private parsePercent(): number {
+    let value = this.parsePrimary();
+    while (this.peek()?.type === 'pct') {
+      this.eat();
+      value /= 100;
+    }
+    return value;
+  }
+
+  private isOperator(value: '+' | '-' | '*' | '/') {
+    const token = this.peek();
+    return token?.type === 'op' && token.value === value;
   }
 
   private parsePrimary(): number {
@@ -206,26 +238,55 @@ class Parser {
   private parseFunction(name: string) {
     const fn = name.toUpperCase();
     this.eat();
-    if (fn === 'RESTA') {
-      const left = this.parseExpression();
-      if (this.peek()?.type !== 'sep') throw new FormulaError('#ERROR!');
-      this.eat();
-      const right = this.parseExpression();
-      if (this.peek()?.type !== 'rp') throw new FormulaError('#ERROR!');
-      this.eat();
-      return left - right;
+    if (fn === 'RESTA') return this.parsePair((left, right) => left - right);
+    if (fn === 'DIVIDIR') {
+      return this.parsePair((left, right) => {
+        if (right === 0) throw new FormulaError('#DIV/0!');
+        return left / right;
+      });
     }
-    if (fn === 'SUMA' || fn === 'SUM' || fn === 'PROMEDIO' || fn === 'AVERAGE' || fn === 'AVG') {
+    if (fn === 'PORCENTAJE') {
+      return this.parsePair((part, total) => {
+        if (total === 0) throw new FormulaError('#DIV/0!');
+        return (part / total) * 100;
+      });
+    }
+    if (
+      fn === 'SUMA' || fn === 'SUM' ||
+      fn === 'PROMEDIO' || fn === 'AVERAGE' || fn === 'AVG' ||
+      fn === 'MULTIPLICAR' || fn === 'PRODUCTO' || fn === 'PRODUCT' ||
+      fn === 'MAXIMO' || fn === 'MAX' || fn === 'MAYOR' ||
+      fn === 'MINIMO' || fn === 'MIN' || fn === 'MENOR'
+    ) {
       const values = this.parseNumberList();
       if (this.peek()?.type !== 'rp') throw new FormulaError('#ERROR!');
       this.eat();
       if (fn === 'SUMA' || fn === 'SUM') {
         return values.reduce((total, value) => total + value, 0);
       }
-      if (values.length === 0) throw new FormulaError('#DIV/0!');
-      return values.reduce((total, value) => total + value, 0) / values.length;
+      if (fn === 'PROMEDIO' || fn === 'AVERAGE' || fn === 'AVG') {
+        if (values.length === 0) throw new FormulaError('#DIV/0!');
+        return values.reduce((total, value) => total + value, 0) / values.length;
+      }
+      if (fn === 'MULTIPLICAR' || fn === 'PRODUCTO' || fn === 'PRODUCT') {
+        return values.reduce((total, value) => total * value, values.length === 0 ? 0 : 1);
+      }
+      if (values.length === 0) return 0;
+      return (fn === 'MINIMO' || fn === 'MIN' || fn === 'MENOR')
+        ? Math.min(...values)
+        : Math.max(...values);
     }
     throw new FormulaError('#NOMBRE?');
+  }
+
+  private parsePair(compute: (left: number, right: number) => number) {
+    const left = this.parseExpression();
+    if (this.peek()?.type !== 'sep') throw new FormulaError('#ERROR!');
+    this.eat();
+    const right = this.parseExpression();
+    if (this.peek()?.type !== 'rp') throw new FormulaError('#ERROR!');
+    this.eat();
+    return compute(left, right);
   }
 
   private parseNumberList() {

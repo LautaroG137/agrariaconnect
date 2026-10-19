@@ -2497,7 +2497,7 @@ const EnvironmentPage = () => {
                     </CardContent>
                     <CardFooter className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                       <p className="text-xs text-muted-foreground">
-                        Fórmulas: =SUMA(A1:A5), =PROMEDIO(A1:A5), =RESTA(A1;A2) o =A1-A2. La letra es la columna y el número la fila.
+                        Fórmulas: =SUMA(A1:A5), =PROMEDIO(A1:A5), =RESTA(A1;A2), =MULTIPLICAR(A1;A2), =DIVIDIR(A1;A2), =PORCENTAJE(A1;A2), =MAXIMO(A1:A5) y =MINIMO(A1:A5). También =A1*A2, =A1/A2 y =A1*10%. La letra es la columna y el número la fila.
                       </p>
                       <Button variant="outline" size="sm" onClick={() => exportSheet(s)}>
                         <Download className="h-3.5 w-3.5 mr-1" /> Exportar CSV

@@ -17,7 +17,8 @@ import {
   Lock,
   KeyRound,
   ExternalLink,
-  Link2
+  Link2,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -52,6 +53,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_ENVIRONMENT_INFO, DEFAULT_ENV_PASSWORD } from './data';
 import { iconMap, ENV_ICON_OPTIONS, isEnvironmentIconKey, DEFAULT_ENV_ICON } from './icons';
 import { useApp } from './context/AppContext';
+import { downloadSpreadsheet } from './lib/spreadsheetCsv';
 import { FormativeEnvironment, Activity, Spreadsheet, Task, EnvironmentType, Notice, NoticeImportance, EnvironmentEvent, EnvironmentLink } from './types';
 
 const ENV_TYPE_STYLES: Record<EnvironmentType, { icon: string; color: string }> = {
@@ -72,6 +74,10 @@ function normalizeLinkUrl(value: string) {
   } catch {
     return '';
   }
+}
+
+function sheetCellKey(sheetId: string, rowIndex: number, column: string) {
+  return `${sheetId}\u0000${rowIndex}\u0000${column}`;
 }
 
 function linkHost(url: string) {
@@ -1238,6 +1244,7 @@ const EnvironmentPage = () => {
     removeEnvironment,
     addSpreadsheet,
     updateSpreadsheet,
+    removeSpreadsheet,
     links,
     addEnvironmentLink,
     updateEnvironmentLink,
@@ -1280,6 +1287,15 @@ const EnvironmentPage = () => {
   const [newSheetTitle, setNewSheetTitle] = useState('');
   const [newSheetCols, setNewSheetCols] = useState('');
   const [newSheetRows, setNewSheetRows] = useState('');
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+  const [columnSheetId, setColumnSheetId] = useState<string | null>(null);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [columnError, setColumnError] = useState('');
+  const [deleteSheetTarget, setDeleteSheetTarget] = useState<Spreadsheet | null>(null);
+  const [columnToDelete, setColumnToDelete] = useState<{ sheetId: string; name: string } | null>(null);
+  const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({});
+  const sheetsRef = useRef(envSpreadsheets);
+  sheetsRef.current = envSpreadsheets;
 
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
@@ -1579,24 +1595,151 @@ const EnvironmentPage = () => {
     setNewSheetRows('');
   };
 
-  const updateCell = async (sheetId: string, rowIndex: number, column: string, value: string) => {
+  const clearSheetDrafts = (sheetId: string) => {
+    const prefix = `${sheetId}\u0000`;
+    setCellDrafts((prev) => {
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (!key.startsWith(prefix) && typeof value === 'string') next[key] = value;
+      }
+      return next;
+    });
+  };
+
+  const latestSheet = (sheetId: string) => sheetsRef.current.find((sheet) => sheet.id === sheetId);
+
+  const commitCell = async (sheetId: string, rowIndex: number, column: string, value: string) => {
+    const key = sheetCellKey(sheetId, rowIndex, column);
+    const current = latestSheet(sheetId);
+    if (!current) return;
+    if (String(current.rows[rowIndex]?.[column] ?? '') === value) {
+      setCellDrafts((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
     const ok = await ensureWriteAccess();
-    if (!ok) return;
-    const sheet = envSpreadsheets.find((s) => s.id === sheetId);
-    if (!sheet) return;
-    const newRows = [...sheet.rows];
-    newRows[rowIndex] = { ...newRows[rowIndex], [column]: value };
+    if (!ok) {
+      setCellDrafts((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+    const sheet = latestSheet(sheetId);
+    if (!sheet || !sheet.rows[rowIndex]) return;
+    const newRows = sheet.rows.map((row, index) =>
+      index === rowIndex ? { ...row, [column]: value } : row
+    );
     await updateSpreadsheet(sheetId, { rows: newRows });
+    setCellDrafts((prev) => {
+      if (prev[key] !== value) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   };
 
   const addRowToSheet = async (sheetId: string) => {
     const ok = await ensureWriteAccess();
     if (!ok) return;
-    const sheet = envSpreadsheets.find((s) => s.id === sheetId);
+    const sheet = latestSheet(sheetId);
     if (!sheet) return;
-    const newRow: Record<string, any> = { Fila: `Nueva Fila ${sheet.rows.length + 1}` };
-    sheet.columns.slice(1).forEach(col => newRow[col] = '');
+    const newRow: Record<string, string> = {};
+    sheet.columns.forEach((col, index) => {
+      newRow[col] = index === 0 ? `Nueva fila ${sheet.rows.length + 1}` : '';
+    });
     await updateSpreadsheet(sheetId, { rows: [...sheet.rows, newRow] });
+    clearSheetDrafts(sheetId);
+  };
+
+  const removeRowFromSheet = async (sheetId: string, rowIndex: number) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    const sheet = latestSheet(sheetId);
+    if (!sheet) return;
+    await updateSpreadsheet(sheetId, {
+      rows: sheet.rows.filter((_, index) => index !== rowIndex),
+    });
+    clearSheetDrafts(sheetId);
+  };
+
+  const openColumnDialog = (sheetId: string) => {
+    setColumnSheetId(sheetId);
+    setNewColumnName('');
+    setColumnError('');
+    setColumnDialogOpen(true);
+  };
+
+  const handleAddColumn = async () => {
+    const name = newColumnName.trim();
+    const sheet = columnSheetId ? latestSheet(columnSheetId) : undefined;
+    if (!sheet) return;
+    if (!name) {
+      setColumnError('Ingresá un nombre para la columna');
+      return;
+    }
+    if (sheet.columns.some((column) => column.toLowerCase() === name.toLowerCase())) {
+      setColumnError('Ya hay una columna con ese nombre');
+      return;
+    }
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    const latest = latestSheet(sheet.id);
+    if (!latest) return;
+    await updateSpreadsheet(sheet.id, {
+      columns: [...latest.columns, name],
+      rows: latest.rows.map((row) => ({ ...row, [name]: row[name] ?? '' })),
+    });
+    clearSheetDrafts(sheet.id);
+    setColumnDialogOpen(false);
+    setNewColumnName('');
+    setColumnError('');
+  };
+
+  const handleRemoveColumn = async () => {
+    if (!columnToDelete) return;
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    const sheet = latestSheet(columnToDelete.sheetId);
+    if (!sheet || sheet.columns.length <= 1) {
+      setColumnToDelete(null);
+      return;
+    }
+    const columns = sheet.columns.filter((column) => column !== columnToDelete.name);
+    const rows = sheet.rows.map((row) => {
+      const next = { ...row };
+      delete next[columnToDelete.name];
+      return next;
+    });
+    await updateSpreadsheet(sheet.id, { columns, rows });
+    clearSheetDrafts(sheet.id);
+    setColumnToDelete(null);
+  };
+
+  const handleDeleteSheet = async () => {
+    if (!deleteSheetTarget) return;
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await removeSpreadsheet(deleteSheetTarget.id);
+    clearSheetDrafts(deleteSheetTarget.id);
+    setDeleteSheetTarget(null);
+  };
+
+  const exportSheet = (sheet: Spreadsheet) => {
+    const rows = sheet.rows.map((row, rowIndex) => {
+      const next = { ...row };
+      for (const column of sheet.columns) {
+        const key = sheetCellKey(sheet.id, rowIndex, column);
+        if (key in cellDrafts) next[column] = cellDrafts[key];
+      }
+      return next;
+    });
+    downloadSpreadsheet(sheet.title, sheet.columns, rows);
   };
 
   const handleCreateSubEnv = async () => {
@@ -2065,14 +2208,27 @@ const EnvironmentPage = () => {
               <div className="grid grid-cols-1 gap-6">
                 {envSpreadsheets.map(s => (
                   <Card key={s.id}>
-                    <CardHeader className="flex flex-row items-center justify-between">
+                    <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <CardTitle>{s.title}</CardTitle>
                         <CardDescription>Creada el {new Date(s.createdAt).toLocaleDateString()}</CardDescription>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => addRowToSheet(s.id)}>
-                        <Plus className="h-3 w-3 mr-1" /> Fila
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openColumnDialog(s.id)}>
+                          <Plus className="h-3 w-3 mr-1" /> Columna
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => addRowToSheet(s.id)}>
+                          <Plus className="h-3 w-3 mr-1" /> Fila
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700"
+                          onClick={() => setDeleteSheetTarget(s)}
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" /> Eliminar
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <div className="rounded-md border overflow-x-auto">
@@ -2080,35 +2236,62 @@ const EnvironmentPage = () => {
                           <TableHeader>
                             <TableRow>
                               {s.columns.map(col => (
-                                <TableHead key={col} className={col === 'Fila' ? 'bg-slate-50 font-bold w-32' : ''}>
-                                  {col}
+                                <TableHead key={col} className={col === 'Fila' ? 'bg-slate-50 font-bold w-40' : 'min-w-36'}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span>{col}</span>
+                                    {s.columns.length > 1 && (
+                                      <button
+                                        type="button"
+                                        className="text-muted-foreground hover:text-red-600"
+                                        aria-label={`Eliminar columna ${col}`}
+                                        onClick={() => setColumnToDelete({ sheetId: s.id, name: col })}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </TableHead>
                               ))}
+                              <TableHead className="w-12" />
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {s.rows.map((row, rowIndex) => (
                               <TableRow key={rowIndex}>
-                                {s.columns.map(col => (
-                                  <TableCell key={col} className={col === 'Fila' ? 'bg-slate-50 font-semibold' : 'p-1'}>
-                                    {col === 'Fila' ? (
-                                      row[col]
-                                    ) : (
-                                      <Input 
+                                {s.columns.map(col => {
+                                  const draftKey = sheetCellKey(s.id, rowIndex, col);
+                                  return (
+                                    <TableCell key={col} className={col === 'Fila' ? 'bg-slate-50 p-1' : 'p-1'}>
+                                      <Input
                                         className="h-8 border-transparent hover:border-slate-200 focus:border-green-500 bg-transparent"
-                                        value={row[col]}
-                                        onChange={(e) => updateCell(s.id, rowIndex, col, e.target.value)}
+                                        value={draftKey in cellDrafts ? cellDrafts[draftKey] : String(row[col] ?? '')}
+                                        onChange={(e) =>
+                                          setCellDrafts((prev) => ({ ...prev, [draftKey]: e.target.value }))
+                                        }
+                                        onBlur={(e) => commitCell(s.id, rowIndex, col, e.target.value)}
                                         placeholder="..."
                                       />
-                                    )}
-                                  </TableCell>
-                                ))}
+                                    </TableCell>
+                                  );
+                                })}
+                                <TableCell className="p-1">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-red-600 hover:text-red-700"
+                                    aria-label={`Eliminar fila ${rowIndex + 1}`}
+                                    onClick={() => removeRowFromSheet(s.id, rowIndex)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TableCell>
                               </TableRow>
                             ))}
                             {s.rows.length === 0 && (
                               <TableRow>
-                                <TableCell colSpan={s.columns.length} className="text-center py-4 text-muted-foreground">
-                                  Planilla vacía. Añada una fila para comenzar.
+                                <TableCell colSpan={s.columns.length + 1} className="text-center py-4 text-muted-foreground">
+                                  Planilla vacía. Añadí una fila para comenzar.
                                 </TableCell>
                               </TableRow>
                             )}
@@ -2117,11 +2300,77 @@ const EnvironmentPage = () => {
                       </div>
                     </CardContent>
                     <CardFooter className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm">Exportar CSV</Button>
+                      <Button variant="outline" size="sm" onClick={() => exportSheet(s)}>
+                        <Download className="h-3.5 w-3.5 mr-1" /> Exportar CSV
+                      </Button>
                     </CardFooter>
                   </Card>
                 ))}
               </div>
+
+              <Dialog
+                open={columnDialogOpen}
+                onOpenChange={(open) => {
+                  setColumnDialogOpen(open);
+                  if (!open) {
+                    setNewColumnName('');
+                    setColumnError('');
+                  }
+                }}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Nueva columna</DialogTitle>
+                    <DialogDescription>Se agrega al final de la planilla, vacía en todas las filas.</DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-2 py-2">
+                    <Label>Nombre</Label>
+                    <Input
+                      value={newColumnName}
+                      onChange={(e) => {
+                        setNewColumnName(e.target.value);
+                        setColumnError('');
+                      }}
+                      placeholder="Ej: Observaciones"
+                    />
+                    {columnError && <p className="text-sm text-red-600">{columnError}</p>}
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setColumnDialogOpen(false)}>Cancelar</Button>
+                    <Button onClick={handleAddColumn} className="bg-green-700 hover:bg-green-800">Agregar columna</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={!!columnToDelete} onOpenChange={(open) => !open && setColumnToDelete(null)}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Eliminar columna</DialogTitle>
+                    <DialogDescription>
+                      ¿Eliminar la columna &quot;{columnToDelete?.name}&quot; y los datos que tiene? Esta acción no se puede deshacer.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setColumnToDelete(null)}>Cancelar</Button>
+                    <Button variant="destructive" onClick={handleRemoveColumn}>Eliminar columna</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={!!deleteSheetTarget} onOpenChange={(open) => !open && setDeleteSheetTarget(null)}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Eliminar planilla</DialogTitle>
+                    <DialogDescription>
+                      ¿Eliminar &quot;{deleteSheetTarget?.title}&quot; y todo su contenido? Esta acción no se puede deshacer.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setDeleteSheetTarget(null)}>Cancelar</Button>
+                    <Button variant="destructive" onClick={handleDeleteSheet}>Eliminar planilla</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </TabsContent>
 
             <TabsContent value="links">

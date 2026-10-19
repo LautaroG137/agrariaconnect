@@ -63,6 +63,7 @@ interface AppContextValue {
     id: string,
     updates: Partial<Pick<Spreadsheet, 'title' | 'columns' | 'rows'>>
   ) => Promise<void>;
+  removeSpreadsheet: (id: string) => Promise<void>;
   addEnvironmentLink: (link: Omit<EnvironmentLink, 'id' | 'createdAt'>) => Promise<void>;
   updateEnvironmentLink: (
     id: string,
@@ -375,6 +376,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSpreadsheets((prev) => prev.map((s) => (s.id === id ? updated : s)));
   };
 
+  const removeSpreadsheet = async (id: string) => {
+    await runMutation(() => api.deleteSpreadsheet(id));
+    setSpreadsheets((prev) => prev.filter((sheet) => sheet.id !== id));
+  };
+
   const addEnvironmentLink = async (link: Omit<EnvironmentLink, 'id' | 'createdAt'>) => {
     const created = await runMutation(() => api.insertEnvironmentLink(link));
     setLinks((prev) => [...prev, created]);
@@ -428,6 +434,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeEnvironment,
         addSpreadsheet,
         updateSpreadsheet,
+        removeSpreadsheet,
         addEnvironmentLink,
         updateEnvironmentLink,
         removeEnvironmentLink,

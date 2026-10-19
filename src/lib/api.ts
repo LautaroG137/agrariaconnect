@@ -635,17 +635,28 @@ export async function patchSpreadsheet(
   updates: Partial<Pick<Spreadsheet, 'title' | 'columns' | 'rows'>>
 ) {
   const client = getClient();
+  const payload: {
+    title?: string;
+    columns?: string[];
+    rows?: Record<string, unknown>[];
+  } = {};
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.columns !== undefined) payload.columns = updates.columns;
+  if (updates.rows !== undefined) payload.rows = updates.rows;
+
   const { data, error } = await client
     .from('spreadsheets')
-    .update({
-      title: updates.title,
-      columns: updates.columns,
-      rows: updates.rows,
-    })
+    .update(payload)
     .eq('id', id)
     .select('*')
     .single();
 
   if (error) throw error;
   return mapSpreadsheet(data as SpreadsheetRow);
+}
+
+export async function deleteSpreadsheet(id: string) {
+  const client = getClient();
+  const { error } = await client.from('spreadsheets').delete().eq('id', id);
+  if (error) throw error;
 }

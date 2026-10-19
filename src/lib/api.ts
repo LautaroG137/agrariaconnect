@@ -51,6 +51,7 @@ type ActivityRow = {
   completed: boolean;
   completed_by: string | null;
   duration_minutes: number | null;
+  assigned_to: string | null;
 };
 
 type NoticeRow = {
@@ -145,6 +146,7 @@ function mapActivity(row: ActivityRow, environmentName: string): Activity {
     completed: row.completed ?? false,
     completedBy: row.completed_by ?? undefined,
     durationMinutes: row.duration_minutes ?? undefined,
+    assignedTo: row.assigned_to ?? undefined,
   };
 }
 
@@ -310,7 +312,7 @@ export async function updateTask(
 }
 
 export async function insertActivity(
-  activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes'>
+  activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes' | 'assignedTo'>
 ) {
   const client = getClient();
   const { data, error } = await client
@@ -334,7 +336,7 @@ export async function updateActivity(
   id: string,
   updates: Partial<
     Pick<Activity, 'title' | 'content' | 'author' | 'imageUrl' | 'completed' | 'completedBy' | 'durationMinutes'>
-  >,
+  > & { assignedTo?: string | null },
   environmentName: string
 ) {
   const client = getClient();
@@ -346,6 +348,7 @@ export async function updateActivity(
   if (updates.completed !== undefined) payload.completed = updates.completed;
   if (updates.completedBy !== undefined) payload.completed_by = updates.completedBy ?? null;
   if (updates.durationMinutes !== undefined) payload.duration_minutes = updates.durationMinutes ?? null;
+  if (updates.assignedTo !== undefined) payload.assigned_to = updates.assignedTo;
 
   const { data, error } = await client
     .from('activities')

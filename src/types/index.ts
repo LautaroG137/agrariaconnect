@@ -23,6 +23,7 @@ export interface Activity {
   completed: boolean;
   completedBy?: string;
   durationMinutes?: number;
+  assignedTo?: string;
 }
 
 export type NoticeImportance = 'normal' | 'important';

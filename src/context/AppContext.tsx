@@ -28,9 +28,11 @@ interface AppContextValue {
   addTask: (task: Omit<Task, 'id' | 'completed'>) => Promise<void>;
   completeTask: (id: string, completedBy: string, durationMinutes: number) => Promise<void>;
   uncompleteTask: (id: string) => Promise<void>;
-  addActivity: (activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes'>) => Promise<void>;
+  addActivity: (activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes' | 'assignedTo'>) => Promise<void>;
   completeActivity: (id: string, completedBy: string, durationMinutes: number) => Promise<void>;
   uncompleteActivity: (id: string) => Promise<void>;
+  assignActivity: (id: string, assignedTo: string) => Promise<void>;
+  unassignActivity: (id: string) => Promise<void>;
   updateActivity: (
     id: string,
     updates: Partial<Pick<Activity, 'title' | 'content' | 'author' | 'imageUrl'>>
@@ -165,7 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addActivity = async (
-    activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes'>
+    activity: Omit<Activity, 'id' | 'createdAt' | 'completed' | 'completedBy' | 'durationMinutes' | 'assignedTo'>
   ) => {
     const created = await runMutation(() => api.insertActivity(activity));
     setActivities((prev) => [created, ...prev]);
@@ -189,6 +191,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         { completed: false, completedBy: undefined, durationMinutes: undefined },
         envName
       )
+    );
+    setActivities((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  };
+
+  const assignActivity = async (id: string, assignedTo: string) => {
+    const activity = activities.find((a) => a.id === id);
+    const envName = activity?.environmentName ?? getEnvironmentName(activity?.environmentId ?? '');
+    const updated = await runMutation(() => api.updateActivity(id, { assignedTo }, envName));
+    setActivities((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  };
+
+  const unassignActivity = async (id: string) => {
+    const activity = activities.find((a) => a.id === id);
+    const envName = activity?.environmentName ?? getEnvironmentName(activity?.environmentId ?? '');
+    const updated = await runMutation(() =>
+      api.updateActivity(id, { assignedTo: null }, envName)
     );
     setActivities((prev) => prev.map((a) => (a.id === id ? updated : a)));
   };
@@ -418,6 +436,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addActivity,
         completeActivity,
         uncompleteActivity,
+        assignActivity,
+        unassignActivity,
         updateActivity,
         removeActivity,
         addNotice,

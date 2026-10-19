@@ -14,6 +14,7 @@ import {
   Trash2,
   Package,
   Pencil,
+  UserPlus,
   Lock,
   KeyRound,
   ExternalLink,
@@ -380,6 +381,8 @@ const ActivityItem = ({
   onDelete,
   onComplete,
   onUncomplete,
+  onAssign,
+  onUnassign,
 }: {
   activity: Activity;
   onUpdate: (
@@ -389,11 +392,15 @@ const ActivityItem = ({
   onDelete: (id: string) => Promise<void>;
   onComplete: (id: string, completedBy: string, durationMinutes: number) => void;
   onUncomplete: (id: string) => void;
+  onAssign: (id: string, assignedTo: string) => void;
+  onUnassign: (id: string) => void;
   key?: string;
 }) => {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignedTo, setAssignedTo] = useState('');
   const [completedBy, setCompletedBy] = useState('');
   const [durationMinutes, setDurationMinutes] = useState('');
   const [editTitle, setEditTitle] = useState(activity.title);
@@ -406,6 +413,17 @@ const ActivityItem = ({
     setEditContent(activity.content);
     setEditAuthor(activity.author);
     setEditOpen(true);
+  };
+
+  const openAssign = () => {
+    setAssignedTo(activity.assignedTo ?? '');
+    setAssignOpen(true);
+  };
+
+  const handleConfirmAssign = () => {
+    if (!assignedTo.trim()) return;
+    onAssign(activity.id, assignedTo.trim());
+    setAssignOpen(false);
   };
 
   const handleCircleClick = () => {
@@ -452,7 +470,7 @@ const ActivityItem = ({
 
   return (
     <>
-      <Card className={`mb-4 overflow-hidden border-l-4 ${activity.completed ? 'border-l-slate-300' : 'border-l-green-600'}`}>
+      <Card className={`mb-4 overflow-hidden border-l-4 ${activity.completed ? 'border-l-slate-300' : activity.assignedTo ? 'border-l-amber-500' : 'border-l-green-600'}`}>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -477,6 +495,17 @@ const ActivityItem = ({
             </div>
             <div className="flex items-center gap-1">
               {!activity.completed && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={openAssign}
+                  aria-label={activity.assignedTo ? 'Cambiar asignación' : 'Asignar actividad'}
+                >
+                  <UserPlus className="h-4 w-4" />
+                </Button>
+              )}
+              {!activity.completed && (
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openEdit} aria-label="Editar actividad">
                   <Pencil className="h-4 w-4" />
                 </Button>
@@ -500,6 +529,11 @@ const ActivityItem = ({
           <p className="text-sm whitespace-pre-wrap text-muted-foreground">
             {activity.content}
           </p>
+          {activity.assignedTo && (
+            <p className="text-xs text-amber-800 mt-2">
+              Asignada a {activity.assignedTo}
+            </p>
+          )}
           {activity.completed && activity.completedBy && (
             <p className="text-xs text-muted-foreground mt-2">
               Realizada por {activity.completedBy}
@@ -550,6 +584,46 @@ const ActivityItem = ({
               className="bg-green-700 hover:bg-green-800"
             >
               {saving ? 'Guardando...' : 'Guardar cambios'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Asignar actividad</DialogTitle>
+            <DialogDescription>
+              Indicá a quién se asigna esta actividad.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <Label>Asignada a</Label>
+            <Input
+              value={assignedTo}
+              onChange={(e) => setAssignedTo(e.target.value)}
+              placeholder="Ej: Alumno García"
+            />
+          </div>
+          <DialogFooter>
+            {activity.assignedTo && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  onUnassign(activity.id);
+                  setAssignOpen(false);
+                }}
+              >
+                Quitar asignación
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={handleConfirmAssign}
+              disabled={!assignedTo.trim()}
+              className="bg-green-700 hover:bg-green-800"
+            >
+              Asignar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1231,6 +1305,8 @@ const EnvironmentPage = () => {
     addActivity,
     completeActivity,
     uncompleteActivity,
+    assignActivity,
+    unassignActivity,
     updateActivity,
     removeActivity,
     updateEnvironmentInfo,
@@ -1261,7 +1337,9 @@ const EnvironmentPage = () => {
   const localActivities = activities
     .filter((a) => a.environmentId === id)
     .sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      const rank = (activity: Activity) => (activity.completed ? 2 : activity.assignedTo ? 1 : 0);
+      const rankDiff = rank(a) - rank(b);
+      if (rankDiff !== 0) return rankDiff;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   const envSpreadsheets = spreadsheets.filter((s) => s.environmentId === id);
@@ -1792,6 +1870,18 @@ const EnvironmentPage = () => {
     await uncompleteActivity(activityId);
   };
 
+  const guardedAssignActivity = async (activityId: string, assignedTo: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await assignActivity(activityId, assignedTo);
+  };
+
+  const guardedUnassignActivity = async (activityId: string) => {
+    const ok = await ensureWriteAccess();
+    if (!ok) return;
+    await unassignActivity(activityId);
+  };
+
   const guardedCompleteTask = async (
     taskId: string,
     completedBy: string,
@@ -2006,6 +2096,8 @@ const EnvironmentPage = () => {
                     onDelete={guardedDeleteActivity}
                     onComplete={guardedCompleteActivity}
                     onUncomplete={guardedUncompleteActivity}
+                    onAssign={guardedAssignActivity}
+                    onUnassign={guardedUnassignActivity}
                   />
                 ))}
                 {localActivities.length === 0 && (

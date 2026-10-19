@@ -452,7 +452,7 @@ const ActivityItem = ({
 
   return (
     <>
-      <Card className={`mb-4 overflow-hidden border-l-4 ${activity.completed ? 'border-l-slate-300 opacity-80' : 'border-l-green-600'}`}>
+      <Card className={`mb-4 overflow-hidden border-l-4 ${activity.completed ? 'border-l-slate-300' : 'border-l-green-600'}`}>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -477,29 +477,27 @@ const ActivityItem = ({
             </div>
             <div className="flex items-center gap-1">
               {!activity.completed && (
-                <>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openEdit} aria-label="Editar actividad">
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-600 hover:text-red-700"
-                    onClick={() => setDeleteOpen(true)}
-                    aria-label="Eliminar actividad"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openEdit} aria-label="Editar actividad">
+                  <Pencil className="h-4 w-4" />
+                </Button>
               )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-red-600 hover:text-red-700"
+                onClick={() => setDeleteOpen(true)}
+                aria-label="Eliminar actividad"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </div>
           </div>
-          <CardTitle className={`text-lg mt-1 ${activity.completed ? 'line-through text-muted-foreground' : ''}`}>
+          <CardTitle className="text-lg mt-1">
             {activity.title}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className={`text-sm whitespace-pre-wrap ${activity.completed ? 'line-through text-muted-foreground' : 'text-muted-foreground'}`}>
+          <p className="text-sm whitespace-pre-wrap text-muted-foreground">
             {activity.content}
           </p>
           {activity.completed && activity.completedBy && (

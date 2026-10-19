@@ -1516,8 +1516,6 @@ const EnvironmentPage = () => {
 
   const handleAddActivityManual = async () => {
     if (!newActivityTitle.trim() || !newActivityContent.trim()) return;
-    const ok = await ensureWriteAccess();
-    if (!ok) return;
     await addActivity({
       environmentId: id!,
       environmentName: env.name,

@@ -9,6 +9,8 @@ export interface FormativeEnvironment {
   color: string;
   parentId?: string;
   password: string;
+  recoveryQuestion?: string;
+  recoveryAnswer?: string;
 }
 
 export interface Activity {

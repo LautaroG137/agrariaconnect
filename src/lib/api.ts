@@ -21,6 +21,8 @@ type EnvironmentRow = {
   color: string;
   parent_id: string | null;
   password: string | null;
+  recovery_question: string | null;
+  recovery_answer: string | null;
 };
 
 type EnvironmentDetailsRow = {
@@ -117,6 +119,8 @@ function mapEnvironment(row: EnvironmentRow): FormativeEnvironment {
     color: row.color,
     parentId: row.parent_id ?? undefined,
     password: row.password || '1111',
+    recoveryQuestion: row.recovery_question ?? undefined,
+    recoveryAnswer: row.recovery_answer ?? undefined,
   };
 }
 
@@ -550,6 +554,8 @@ export async function patchEnvironment(
   if (updates.color !== undefined) payload.color = updates.color;
   if (updates.parentId !== undefined) payload.parent_id = updates.parentId ?? null;
   if (updates.password !== undefined) payload.password = updates.password;
+  if (updates.recoveryQuestion !== undefined) payload.recovery_question = updates.recoveryQuestion;
+  if (updates.recoveryAnswer !== undefined) payload.recovery_answer = updates.recoveryAnswer;
 
   const { data, error } = await client
     .from('environments')

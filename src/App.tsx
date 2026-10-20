@@ -241,6 +241,9 @@ const unlockWrites = (id: string) => {
   }
 };
 
+const answersMatch = (input: string, expected: string) =>
+  input.trim().toLocaleLowerCase('es') === expected.trim().toLocaleLowerCase('es');
+
 const PasswordPromptDialog = ({
   open,
   onOpenChange,
@@ -249,6 +252,9 @@ const PasswordPromptDialog = ({
   expectedPassword,
   onSuccess,
   confirmLabel = 'Continuar',
+  recoveryQuestion,
+  recoveryAnswer,
+  onResetPassword,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -257,9 +263,28 @@ const PasswordPromptDialog = ({
   expectedPassword: string;
   onSuccess: () => void;
   confirmLabel?: string;
+  recoveryQuestion?: string;
+  recoveryAnswer?: string;
+  onResetPassword?: (newPassword: string) => Promise<void>;
 }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryInput, setRecoveryInput] = useState('');
+  const [nextPassword, setNextPassword] = useState('');
+  const [confirmNext, setConfirmNext] = useState('');
+  const [savingReset, setSavingReset] = useState(false);
+  const canRecover = Boolean(recoveryQuestion?.trim() && recoveryAnswer?.trim());
+
+  const close = () => {
+    setPassword('');
+    setError('');
+    setRecovering(false);
+    setRecoveryInput('');
+    setNextPassword('');
+    setConfirmNext('');
+    onOpenChange(false);
+  };
 
   const handleConfirm = () => {
     if (password !== (expectedPassword || DEFAULT_ENV_PASSWORD)) {
@@ -272,50 +297,157 @@ const PasswordPromptDialog = ({
     onOpenChange(false);
   };
 
+  const handleReset = async () => {
+    if (!canRecover || !recoveryAnswer || !onResetPassword) return;
+    if (!answersMatch(recoveryInput, recoveryAnswer)) {
+      setError('La respuesta no es correcta');
+      return;
+    }
+    if (!nextPassword.trim()) {
+      setError('Ingresá una contraseña nueva');
+      return;
+    }
+    if (nextPassword !== confirmNext) {
+      setError('Las contraseñas nuevas no coinciden');
+      return;
+    }
+    setSavingReset(true);
+    try {
+      await onResetPassword(nextPassword.trim());
+      setPassword('');
+      setError('');
+      setRecovering(false);
+      onSuccess();
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar la contraseña');
+    } finally {
+      setSavingReset(false);
+    }
+  };
+
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) {
-          setPassword('');
-          setError('');
-        }
-        onOpenChange(next);
+        if (!next) close();
+        else onOpenChange(next);
       }}
     >
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Lock className="h-5 w-5 text-green-700" />
-            {title}
+            {recovering ? 'Recuperar contraseña' : title}
           </DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
+          <DialogDescription>
+            {recovering
+              ? canRecover
+                ? 'Respondé la pregunta y elegí una contraseña nueva.'
+                : 'Este entorno todavía no tiene una pregunta de recuperación.'
+              : description}
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-2">
-          <div className="grid gap-2">
-            <Label htmlFor="env-password">Contraseña</Label>
-            <Input
-              id="env-password"
-              type="password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setError('');
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleConfirm();
-              }}
-              placeholder="Ingresá la contraseña"
-              autoFocus
-            />
-            {error && <p className="text-sm text-red-600">{error}</p>}
+        {recovering ? (
+          canRecover ? (
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2">
+                <Label>Pregunta</Label>
+                <p className="text-sm">{recoveryQuestion}</p>
+              </div>
+              <div className="grid gap-2">
+                <Label>Respuesta</Label>
+                <Input
+                  value={recoveryInput}
+                  onChange={(e) => {
+                    setRecoveryInput(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="Tu respuesta"
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Contraseña nueva</Label>
+                <Input
+                  type="password"
+                  value={nextPassword}
+                  onChange={(e) => {
+                    setNextPassword(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="Nueva contraseña"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Confirmar contraseña nueva</Label>
+                <Input
+                  type="password"
+                  value={confirmNext}
+                  onChange={(e) => {
+                    setConfirmNext(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="Repetí la nueva contraseña"
+                />
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+            </div>
+          ) : (
+            <p className="py-2 text-sm text-muted-foreground">
+              Si nadie cambió la contraseña, la inicial es 1111. Si ya la cambiaron, quien la conozca puede entrar a Contraseña y guardar una pregunta de recuperación.
+            </p>
+          )
+        ) : (
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="env-password">Contraseña</Label>
+              <Input
+                id="env-password"
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleConfirm();
+                }}
+                placeholder="Ingresá la contraseña"
+                autoFocus
+              />
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <button
+                type="button"
+                className="w-fit text-sm text-green-800 underline-offset-2 hover:underline"
+                onClick={() => {
+                  setRecovering(true);
+                  setError('');
+                }}
+              >
+                Olvidé la contraseña
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleConfirm} className="bg-green-700 hover:bg-green-800">
-            {confirmLabel}
-          </Button>
+          {recovering ? (
+            <>
+              <Button variant="outline" onClick={() => { setRecovering(false); setError(''); }}>Volver</Button>
+              {canRecover && (
+                <Button onClick={handleReset} disabled={savingReset} className="bg-green-700 hover:bg-green-800">
+                  {savingReset ? 'Guardando...' : 'Guardar contraseña'}
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={close}>Cancelar</Button>
+              <Button onClick={handleConfirm} className="bg-green-700 hover:bg-green-800">
+                {confirmLabel}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1323,6 +1455,12 @@ const Dashboard = () => {
         expectedPassword={passwordAuth?.env.password || DEFAULT_ENV_PASSWORD}
         onSuccess={handlePasswordSuccess}
         confirmLabel="Continuar"
+        recoveryQuestion={passwordAuth?.env.recoveryQuestion}
+        recoveryAnswer={passwordAuth?.env.recoveryAnswer}
+        onResetPassword={async (newPassword) => {
+          if (!passwordAuth) return;
+          await updateEnvironment(passwordAuth.env.id, { password: newPassword });
+        }}
       />
     </div>
   );
@@ -1456,6 +1594,8 @@ const EnvironmentPage = () => {
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [changePasswordError, setChangePasswordError] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+  const [recoveryQuestionInput, setRecoveryQuestionInput] = useState('');
+  const [recoveryAnswerInput, setRecoveryAnswerInput] = useState('');
 
   if (loading) return <div className="container mx-auto px-4 py-16 text-center text-muted-foreground">Cargando entorno...</div>;
   if (!env) return <div>Entorno no encontrado</div>;
@@ -1533,13 +1673,29 @@ const EnvironmentPage = () => {
       setChangePasswordError('Las contraseñas nuevas no coinciden');
       return;
     }
+    const question = recoveryQuestionInput.trim();
+    const answer = recoveryAnswerInput.trim();
+    if (!question) {
+      setChangePasswordError('Ingresá una pregunta de recuperación');
+      return;
+    }
+    if (!answer && (!env.recoveryAnswer || question !== (env.recoveryQuestion ?? ''))) {
+      setChangePasswordError('Ingresá la respuesta de recuperación');
+      return;
+    }
     setSavingPassword(true);
     try {
-      await updateEnvironment(env.id, { password: newPasswordInput.trim() });
+      await updateEnvironment(env.id, {
+        password: newPasswordInput.trim(),
+        recoveryQuestion: question,
+        ...(answer ? { recoveryAnswer: answer } : {}),
+      });
       setChangePasswordOpen(false);
       setCurrentPasswordInput('');
       setNewPasswordInput('');
       setConfirmPasswordInput('');
+      setRecoveryQuestionInput('');
+      setRecoveryAnswerInput('');
       setChangePasswordError('');
     } finally {
       setSavingPassword(false);
@@ -2082,7 +2238,11 @@ const EnvironmentPage = () => {
               <p className="text-muted-foreground">{env.description}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setChangePasswordOpen(true)}>
+              <Button type="button" variant="outline" size="sm" onClick={() => {
+                setRecoveryQuestionInput(env.recoveryQuestion ?? '');
+                setRecoveryAnswerInput('');
+                setChangePasswordOpen(true);
+              }}>
                 <KeyRound className="h-4 w-4 mr-1" /> Contraseña
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => requestEditEnv()}>
@@ -3076,6 +3236,11 @@ const EnvironmentPage = () => {
         expectedPassword={env.password || DEFAULT_ENV_PASSWORD}
         onSuccess={handleWritePasswordSuccess}
         confirmLabel="Confirmar"
+        recoveryQuestion={env.recoveryQuestion}
+        recoveryAnswer={env.recoveryAnswer}
+        onResetPassword={async (newPassword) => {
+          await updateEnvironment(env.id, { password: newPassword });
+        }}
       />
 
       <Dialog
@@ -3086,6 +3251,8 @@ const EnvironmentPage = () => {
             setCurrentPasswordInput('');
             setNewPasswordInput('');
             setConfirmPasswordInput('');
+            setRecoveryQuestionInput('');
+            setRecoveryAnswerInput('');
             setChangePasswordError('');
           }
         }}
@@ -3097,7 +3264,7 @@ const EnvironmentPage = () => {
               Cambiar contraseña
             </DialogTitle>
             <DialogDescription>
-              Actualizá la contraseña de acceso de &quot;{env.name}&quot;.
+              Actualizá la contraseña de acceso de &quot;{env.name}&quot; y guardá una pregunta por si la olvidan.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -3135,6 +3302,28 @@ const EnvironmentPage = () => {
                   setChangePasswordError('');
                 }}
                 placeholder="Repetí la nueva contraseña"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Pregunta de recuperación</Label>
+              <Input
+                value={recoveryQuestionInput}
+                onChange={(e) => {
+                  setRecoveryQuestionInput(e.target.value);
+                  setChangePasswordError('');
+                }}
+                placeholder="Ej: ¿Cómo se llama la escuela?"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Respuesta</Label>
+              <Input
+                value={recoveryAnswerInput}
+                onChange={(e) => {
+                  setRecoveryAnswerInput(e.target.value);
+                  setChangePasswordError('');
+                }}
+                placeholder={env.recoveryAnswer ? 'Dejala vacía para mantener la actual' : 'Respuesta'}
               />
             </div>
             {changePasswordError && <p className="text-sm text-red-600">{changePasswordError}</p>}

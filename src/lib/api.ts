@@ -21,7 +21,6 @@ type EnvironmentRow = {
   color: string;
   parent_id: string | null;
   password: string | null;
-  recovery_email: string | null;
 };
 
 type EnvironmentDetailsRow = {
@@ -118,7 +117,6 @@ function mapEnvironment(row: EnvironmentRow): FormativeEnvironment {
     color: row.color,
     parentId: row.parent_id ?? undefined,
     password: row.password || '1111',
-    recoveryEmail: row.recovery_email ?? undefined,
   };
 }
 
@@ -552,7 +550,6 @@ export async function patchEnvironment(
   if (updates.color !== undefined) payload.color = updates.color;
   if (updates.parentId !== undefined) payload.parent_id = updates.parentId ?? null;
   if (updates.password !== undefined) payload.password = updates.password;
-  if (updates.recoveryEmail !== undefined) payload.recovery_email = updates.recoveryEmail || null;
 
   const { data, error } = await client
     .from('environments')
@@ -563,17 +560,6 @@ export async function patchEnvironment(
 
   if (error) throw error;
   return mapEnvironment(data as EnvironmentRow);
-}
-
-export async function requestEnvironmentPasswordReset(environmentId: string) {
-  const client = getClient();
-  const { data, error } = await client.functions.invoke('reset-environment-password', {
-    body: { environmentId },
-  });
-  if (error) throw new Error('No se pudo enviar el mail.');
-  const result = data as { ok?: boolean; error?: string; email?: string } | null;
-  if (!result?.ok) throw new Error(result?.error || 'No se pudo enviar el mail.');
-  return result.email ?? '';
 }
 
 export async function deleteEnvironment(id: string) {
